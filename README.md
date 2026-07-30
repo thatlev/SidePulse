@@ -371,9 +371,9 @@ iPhone on and unlocked:
 1. Open `ios/SidePulseSim/SidePulseSim.xcodeproj`.
 2. Target → **Signing & Capabilities** → "Automatically manage signing" → pick
    **your** Personal Team, and set a unique bundle ID if it collides.
-   > The committed project has `DEVELOPMENT_TEAM` set to a placeholder team ID.
-   > Replace it with your own (Xcode does this when you pick your team), or
-   > override per-build with
+   > The committed project ships with an empty `DEVELOPMENT_TEAM`, so you must
+   > pick your own team once. Xcode sets it when you choose one, or override
+   > per-build with
    > `-allowProvisioningUpdates DEVELOPMENT_TEAM=<YOUR_TEAM_ID>`.
 3. Select the iPhone as destination → **Product → Run**. First install: on the
    phone, trust the developer cert under
@@ -460,10 +460,9 @@ without stopping the lights:
 - **Secrets & host-specific config** — `.env*`, `*.bak-sidepulse`,
   `settings.local.json`, signing material (`*.p8`, `*.p12`, `*.mobileprovision`).
 
-> One identifier still lives inside a tracked file: `DEVELOPMENT_TEAM` in
-> `ios/SidePulseSim/SidePulseSim.xcodeproj/project.pbxproj`. It's an Apple Team
-> ID (low sensitivity), but for a clean public repo, replace it with your own or
-> a placeholder — see [Sideloading](#sideloading-to-a-physical-iphone).
+> No signing identity is committed: `DEVELOPMENT_TEAM` in
+> `ios/SidePulseSim/SidePulseSim.xcodeproj/project.pbxproj` is empty, so set
+> your own team once — see [Sideloading](#sideloading-to-a-physical-iphone).
 
 ---
 
@@ -581,9 +580,9 @@ per release — `CFBundleVersion` must increase monotonically.
 denies the Bonjour advertisement and the phone never discovers the Mac. The
 symptom is a permanently grey phone with a Mac app that looks healthy.
 
-**6 · Before pushing publicly**, replace the placeholder `DEVELOPMENT_TEAM` in
-`ios/SidePulseSim/SidePulseSim.xcodeproj/project.pbxproj` with your own team ID
-or a placeholder — see [What is git-ignored, and why](#what-is-git-ignored-and-why).
+**6 · Signing identity.** `DEVELOPMENT_TEAM` is committed empty on purpose, so
+nobody inherits someone else's team. Set yours locally and take care not to
+commit it back — see [What is git-ignored, and why](#what-is-git-ignored-and-why).
 
 For the phone app, distribution beyond sideloading means TestFlight or the App
 Store: set your team, a unique bundle ID, an app icon (already present), and
