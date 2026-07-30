@@ -1,0 +1,4 @@
+; working sidepost
+off 0ms none
+0:#26D8FF 600ms pulse; 1:#26D8FF 600ms pulse 300ms
+repeat

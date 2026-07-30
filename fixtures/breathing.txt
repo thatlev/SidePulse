@@ -1,0 +1,4 @@
+; breathing
+#404040 1.4s pulse
+off 400ms none
+repeat

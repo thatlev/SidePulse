@@ -1,0 +1,6 @@
+; needs you
+#ff3b30 120ms none
+off 120ms none
+#ff3b30 120ms none
+off 900ms none
+repeat

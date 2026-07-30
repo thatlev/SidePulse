@@ -1,0 +1,375 @@
+#!/usr/bin/env python3
+"""sidepulse-solo — single-agent status light (one device = one project).
+
+A deliberately simple alternative to sidepulse-event: no slots, no locking.
+Lifecycle hooks pipe their event JSON on stdin; this maps the event to a program
+for the claimed device profile and writes LEDS.TXT atomically.
+
+  ATLD / 8 LED:
+    working / thinking  -> green snake sweeping left -> right
+    waiting approval    -> solid orange
+    done                -> solid green
+    error / failure     -> all 8 double-blink red
+
+  Side Post / 2 LED:
+    idle                -> both subtly pulse solid blue
+    working / thinking  -> cyan ping-pong
+    waiting permission  -> both solid orange
+    permission allowed  -> cyan left, orange right; then purple working
+    done                -> both solid green
+    error / failure     -> both double-blink red
+
+Claiming a directory shows its idle state right away, so you can see the newly
+chosen project is live and waiting.
+
+CHOOSING WHICH AGENT OWNS THE STRIP
+  With more than one agent running, they would otherwise fight over the single
+  strip. Claim it from the project you care about and only that project's agent
+  drives the light:
+
+    sidepulse-solo --claim --device sidepost
+    sidepulse-solo --who        # show the current owner
+    sidepulse-solo --release    # anyone can drive it again
+
+  Ownership is keyed by project directory, so every agent session in that
+  directory counts as the owner. With no owner set, the most recent event from
+  any agent wins. Device aliases: atld/strip/pro/8 or sidepost/post/dot/2.
+
+Guarantees: single atomic write (temp + rename), skipped when unchanged, and
+exits 0 on ANY failure so lighting never interrupts an agent.
+
+Usage: sidepulse-solo [provider] < event.json        # hook mode (event on stdin)
+       sidepulse-solo working|approval|done|off       # manual (ignores owner)
+       sidepulse-solo --claim [dir] [--device atld|sidepost]
+       sidepulse-solo --device atld|sidepost | --release | --who
+Honors $SIDEPULSE_FILE and $SIDEPULSE_REVERSE (flip strip direction).
+"""
+import json
+import os
+import sys
+import tempfile
+
+STATE_DIR = os.path.abspath(os.path.expanduser(
+    os.environ.get("SIDEPULSE_STATE_DIR", "~/Library/Caches/SidePulse")))
+OWNER_FILE = os.path.join(STATE_DIR, "solo-owner")
+DEVICE_FILE = os.path.join(STATE_DIR, "solo-device")
+LEDS_FILE = os.path.abspath(os.path.expanduser(
+    os.environ.get("SIDEPULSE_FILE", "~/sidepulse/LEDS.TXT")))
+REVERSE = os.environ.get("SIDEPULSE_REVERSE") == "1"
+
+GREEN = "#30D158"    # working snake + done
+DIMGREEN = "#2AB84C" # idle-pulse trough: only a touch dimmer than GREEN
+ORANGE = "#FF9500"   # waiting for approval
+RED = "#FF2D20"      # error double-blink
+CYAN = "#26D8FF"     # Side Post working ping-pong
+IDLE_BLUE_DIM = "#22C5E8"
+PURPLE = "#BF5AF2"   # Side Post post-approval working pulse
+APPROVED_ORANGE = "#FF9F0A"
+
+DEVICE_ALIASES = {
+    "atld": "atld", "strip": "atld", "pro": "atld", "8": "atld",
+    "sidepost": "sidepost", "side-post": "sidepost", "post": "sidepost",
+    "dot": "sidepost", "2": "sidepost",
+}
+
+# Hook event name -> abstract state. Manual state words alias to themselves so
+# `sidepulse-solo working` works for quick testing.
+EVENT_STATE = {
+    "sessionstart": "idle",          # session open but not working -> breathing green
+    "userpromptsubmit": "working",
+    "posttooluse": "tool_complete",  # approved only when permission was pending
+    "permissionresult": "approved",  # providers with an explicit approval result
+    "permissionrequest": "approval",
+    "notification": "approval",      # permission / input notification
+    "stop": "turn_done",
+    "stopfailure": "error",          # Kimi: turn failed
+    "turn-error": "error",           # generic failure event
+    "interrupt": "idle",             # turn cancelled, session still open
+    "sessionend": "off",
+    "agent-turn-complete": "turn_done",  # Codex notify
+    "turn-ended": "turn_done",
+    # manual aliases
+    "working": "working", "thinking": "working",
+    "approval": "approval", "needs_input": "approval",
+    "approved": "approved", "allowed": "approved",
+    "done": "done", "complete": "done",
+    "error": "error", "failure": "error",
+    "idle": "idle",
+    "off": "off",
+}
+
+
+def atld_snake():
+    """A green pulse travelling LED 0 -> 7 (left to right), looping forever.
+
+    Each LED pulses in turn, 80 ms behind the one before it, so a lit green head
+    sweeps across the strip. Reverse flips the travel direction."""
+    order = list(range(8))
+    if REVERSE:
+        order = order[::-1]
+    seg = "; ".join("%d:%s 380ms pulse %dms" % (led, GREEN, step * 80)
+                    for step, led in enumerate(order))
+    return "; working\noff 80ms none\n%s\nrepeat\n" % seg
+
+
+def atld_error_blink():
+    """All 8 LEDs double-blink red then pause, looping — the 'needs you /
+    something failed' signal."""
+    return ("; error\n"
+            "%s 90ms none\noff 90ms none\n"   # blink 1
+            "%s 90ms none\noff 900ms none\n"  # blink 2, then pause
+            "repeat\n" % (RED, RED))
+
+
+ATLD_PROGRAMS = {
+    "working":  atld_snake,
+    # ATLD keeps its original post-approval behavior: resume the green snake.
+    "approved": atld_snake,
+    "approval": lambda: "; approval\n%s 250ms ease-out\n" % ORANGE,
+    "done":     lambda: "; done\n%s 250ms ease-out\n" % GREEN,
+    "error":    atld_error_blink,
+    # Near-constant green with a tiny quick shimmer (barely dips), forever.
+    # "Claimed and idle" — steady, but alive for the camera.
+    "idle":     lambda: "; idle\n%s 1s cosine\n%s 1s cosine\nrepeat\n"
+                        % (GREEN, DIMGREEN),
+    "off":      lambda: "off 200ms none\n",
+}
+
+
+def sidepost_working():
+    """Run a smooth cyan pulse from one dot to the other, forever."""
+    first, second = (1, 0) if REVERSE else (0, 1)
+    return ("; working sidepost\n"
+            "off 0ms none\n"
+            "%d:%s 600ms pulse; %d:%s 600ms pulse 300ms\n"
+            "repeat\n" % (first, CYAN, second, CYAN))
+
+
+def sidepost_permission():
+    """A permission wait holds both dots solid orange."""
+    return ("; permission sidepost\n"
+            "%s 200ms ease-out\n" % APPROVED_ORANGE)
+
+
+def sidepost_approved():
+    """Confirm approval, then enter the second (purple) working phase."""
+    left, right = (1, 0) if REVERSE else (0, 1)
+    return ("; approved sidepost\n"
+            "%d:%s 200ms ease-out; %d:%s 200ms ease-out\n"
+            "%d:%s 800ms none; %d:%s 800ms none\n"
+            "repeat 1\n"
+            "off 0ms none\n"
+            "%d:%s 600ms pulse; %d:%s 600ms pulse 300ms\n"
+            "repeat\n"
+            % (left, CYAN, right, APPROVED_ORANGE,
+               left, CYAN, right, APPROVED_ORANGE,
+               left, PURPLE, right, PURPLE))
+
+
+def sidepost_error():
+    """Both dots double-blink red, then pause 600 ms, forever."""
+    return ("; error sidepost\n"
+            "%s 90ms none\n"
+            "off 90ms none\n"
+            "%s 90ms none\n"
+            "off 600ms none\n"
+            "repeat\n" % (RED, RED))
+
+
+SIDEPOST_PROGRAMS = {
+    "working":  sidepost_working,
+    "approval": sidepost_permission,
+    "approved": sidepost_approved,
+    "done":     lambda: "; done sidepost\n%s 200ms ease-out\n" % GREEN,
+    "error":    sidepost_error,
+    "idle":     lambda: "; idle sidepost\n%s 900ms cosine\n%s 900ms cosine\nrepeat\n"
+                       % (CYAN, IDLE_BLUE_DIM),
+    "off":      lambda: "off 200ms none\n",
+}
+
+PROGRAMS_BY_DEVICE = {
+    "atld": ATLD_PROGRAMS,
+    "sidepost": SIDEPOST_PROGRAMS,
+}
+
+
+def event_name(payload):
+    for field in ("hook_event_name", "event", "type"):
+        v = payload.get(field)
+        if isinstance(v, str) and v:
+            return v.lower()
+    return ""
+
+
+def event_dir(payload):
+    return os.path.realpath(payload.get("cwd") or os.getcwd())
+
+
+def read_owner():
+    try:
+        with open(OWNER_FILE) as f:
+            owner = f.read().strip()
+        return owner or None
+    except OSError:
+        return None
+
+
+def set_owner(path):
+    os.makedirs(STATE_DIR, exist_ok=True)
+    with open(OWNER_FILE, "w") as f:
+        f.write(os.path.realpath(path) + "\n")
+
+
+def read_device():
+    try:
+        with open(DEVICE_FILE) as f:
+            device = f.read().strip().lower()
+        return DEVICE_ALIASES.get(device, "atld")
+    except OSError:
+        return "atld"
+
+
+def set_device(device):
+    canonical = DEVICE_ALIASES.get(str(device).lower())
+    if canonical is None:
+        return None
+    os.makedirs(STATE_DIR, exist_ok=True)
+    with open(DEVICE_FILE, "w") as f:
+        f.write(canonical + "\n")
+    return canonical
+
+
+def requested_device(argv):
+    if "--device" not in argv:
+        return None
+    i = argv.index("--device")
+    return argv[i + 1] if i + 1 < len(argv) else ""
+
+
+def current_programs():
+    return PROGRAMS_BY_DEVICE[read_device()]
+
+
+def write_leds(text):
+    """Single open-write-close, atomic (temp + rename). Skips the write when the
+    file already holds this exact program, and returns quietly when the strip is
+    disconnected (target directory missing)."""
+    if len(text.encode()) > 512:
+        return False
+    directory = os.path.dirname(LEDS_FILE)
+    if not os.path.isdir(directory):
+        return False
+    try:
+        with open(LEDS_FILE) as f:
+            if f.read() == text:
+                return True  # unchanged: nothing to do
+    except OSError:
+        pass
+    fd, tmp = tempfile.mkstemp(dir=directory, prefix=".leds.")
+    with os.fdopen(fd, "w") as f:
+        f.write(text)
+    os.replace(tmp, LEDS_FILE)
+    return True
+
+
+def read_leds():
+    try:
+        with open(LEDS_FILE) as f:
+            return f.read()
+    except OSError:
+        return ""
+
+
+def run_ownership_command(argv):
+    """Handle claim/device/release/status commands. Return True if handled."""
+    if "--claim" in argv:
+        i = argv.index("--claim")
+        target = argv[i + 1] if i + 1 < len(argv) and not argv[i + 1].startswith("-") \
+            else os.getcwd()
+        requested = requested_device(argv)
+        if requested is not None:
+            device = set_device(requested)
+            if device is None:
+                print("sidepulse-solo: unknown device '%s' "
+                      "(use atld or sidepost)" % requested, file=sys.stderr)
+                return True
+        else:
+            device = read_device()
+        set_owner(target)
+        write_leds(PROGRAMS_BY_DEVICE[device]["idle"]())
+        print("sidepulse-solo: %s owner set to %s"
+              % (device, os.path.realpath(target)))
+        return True
+    if "--device" in argv:
+        requested = requested_device(argv)
+        device = set_device(requested)
+        if device is None:
+            print("sidepulse-solo: unknown device '%s' "
+                  "(use atld or sidepost)" % requested, file=sys.stderr)
+            return True
+        write_leds(PROGRAMS_BY_DEVICE[device]["idle"]())
+        print("sidepulse-solo: device set to %s" % device)
+        return True
+    if "--release" in argv:
+        try:
+            os.remove(OWNER_FILE)
+        except OSError:
+            pass
+        print("sidepulse-solo: owner released (any agent can drive the strip)")
+        return True
+    if "--who" in argv or "--status" in argv:
+        owner = read_owner()
+        print("%s (%s)" % (
+            owner if owner else "(no owner — any agent drives the light)",
+            read_device()))
+        return True
+    return False
+
+
+def resolve_state(argv):
+    # Manual mode: first argument that names a state wins (bypasses ownership).
+    for a in argv[1:]:
+        if a.lower() in ATLD_PROGRAMS:
+            return a.lower()
+    # Hook mode: read the event JSON piped on stdin.
+    raw = "" if sys.stdin.isatty() else sys.stdin.read()
+    try:
+        payload = json.loads(raw) if raw.strip() else {}
+        if not isinstance(payload, dict):
+            payload = {}
+    except ValueError:
+        payload = {}
+    # Respect the owner: ignore events from any other project directory.
+    owner = read_owner()
+    if owner and event_dir(payload) != owner:
+        return None
+    return EVENT_STATE.get(event_name(payload))
+
+
+def main():
+    try:
+        if run_ownership_command(sys.argv):
+            return 0
+        state = resolve_state(sys.argv)
+        device = read_device()
+        programs = PROGRAMS_BY_DEVICE[device]
+        current = read_leds()
+        if state == "tool_complete":
+            # Claude reports PostToolUse for every tool. It is an approval
+            # confirmation only if that exact project was visibly waiting for
+            # permission; ordinary tool completions stay in the working state.
+            state = "approved" if (
+                device == "sidepost"
+                and current.startswith("; permission sidepost\n")
+            ) else "working"
+        elif state == "turn_done":
+            state = "done"
+        if state in programs:
+            write_leds(programs[state]())
+    except Exception:
+        pass  # spec: exit successfully — lighting never interrupts an agent
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

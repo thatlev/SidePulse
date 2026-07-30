@@ -1,0 +1,6 @@
+; indexed sparkle
+0:#ffffff 90ms none
+2:#ff00ee 90ms none
+5:#00ccff 90ms none
+off 120ms ease-out
+repeat

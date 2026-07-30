@@ -1,0 +1,4 @@
+; aurora
+0:#0b3d2e 1.8s cosine; 1:#0e5c43 1.8s cosine 0.15s; 2:#11866b 1.8s cosine 0.3s; 3:#0f6f8f 1.8s cosine 0.45s; 4:#155e9e 1.8s cosine 0.6s; 5:#3b4bb8 1.8s cosine 0.75s; 6:#5d3fae 1.8s cosine 0.9s; 7:#7a2f9e 1.8s cosine 1.05s
+0:#7a2f9e 1.8s cosine; 1:#5d3fae 1.8s cosine 0.15s; 2:#3b4bb8 1.8s cosine 0.3s; 3:#155e9e 1.8s cosine 0.45s; 4:#0f6f8f 1.8s cosine 0.6s; 5:#11866b 1.8s cosine 0.75s; 6:#0e5c43 1.8s cosine 0.9s; 7:#0b3d2e 1.8s cosine 1.05s
+repeat

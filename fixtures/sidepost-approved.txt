@@ -1,0 +1,7 @@
+; approved sidepost
+0:#26D8FF 200ms ease-out; 1:#FF9F0A 200ms ease-out
+0:#26D8FF 800ms none; 1:#FF9F0A 800ms none
+repeat 1
+off 0ms none
+0:#BF5AF2 600ms pulse; 1:#BF5AF2 600ms pulse 300ms
+repeat

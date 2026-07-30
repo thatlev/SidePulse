@@ -1,0 +1,2 @@
+; permission sidepost
+#FF9F0A 200ms ease-out

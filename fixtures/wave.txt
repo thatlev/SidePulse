@@ -1,0 +1,4 @@
+; wave
+0:#00c7be 700ms pulse; 1:#00c7be 700ms pulse 100ms; 2:#00c7be 700ms pulse 200ms; 3:#00c7be 700ms pulse 300ms; 4:#00c7be 700ms pulse 400ms; 5:#00c7be 700ms pulse 500ms; 6:#00c7be 700ms pulse 600ms; 7:#00c7be 700ms pulse 700ms
+0:#5e5ce6 700ms pulse; 1:#5e5ce6 700ms pulse 100ms; 2:#5e5ce6 700ms pulse 200ms; 3:#5e5ce6 700ms pulse 300ms; 4:#5e5ce6 700ms pulse 400ms; 5:#5e5ce6 700ms pulse 500ms; 6:#5e5ce6 700ms pulse 600ms; 7:#5e5ce6 700ms pulse 700ms
+repeat

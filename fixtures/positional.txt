@@ -1,0 +1,2 @@
+; positional list - LEDs past the list turn off
+#ff0000 #00ff00 #0000ff

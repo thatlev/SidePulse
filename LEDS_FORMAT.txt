@@ -1,0 +1,207 @@
+# LEDS.TXT DSL
+
+Write LED animation programs to `LEDS.TXT`. Each non-empty, non-comment line is
+one animation step. The embedded controller accepts at most 512 bytes and at
+most 10 physical lines.
+
+The controller keeps the current visible LED state across parses. A successful
+parse starts the new program from line 1 using the current state as the
+transition start colors. A parse error stops the current program and blinks all
+LEDs red six times with 150 ms on/off phases.
+
+## Comments
+
+Blank lines are ignored. Comment lines may start with `;`, `//`, or `# `.
+
+```text
+# all LEDs white
+#ffffff
+
+; all LEDs off
+off
+```
+
+## Colors
+
+Set all LEDs to one color:
+
+```text
+#ffffff
+```
+
+Turn all LEDs off:
+
+```text
+off
+```
+
+Assign colors by position. LEDs past the list turn off:
+
+```text
+#ff0000 #00ff00 #0000ff
+```
+
+Assign specific LEDs. Unmentioned LEDs hold their current state:
+
+```text
+0:#ffffff 2:#ff00ee 7:#0040ff
+```
+
+Multiple segments may appear on one line, separated by semicolons. If an LED is
+assigned more than once on a line, the last assignment wins:
+
+```text
+0:#ff0000 1s; 0:#0000ff 1s
+```
+
+## Brightness
+
+Brightness scales the RGB values written by `step()`. It does not change the
+stored animation colors. Each successful parse starts with brightness 255 unless
+the program includes `brightness N`.
+
+```text
+brightness 128
+#808080
+```
+
+## Timing
+
+A color assignment may be followed by:
+
+```text
+duration
+easing
+duration easing
+duration easing delay
+duration delay
+easing delay
+```
+
+Durations and delays accept integer milliseconds, integer seconds, or decimal
+seconds:
+
+```text
+#ff00ff 330ms
+#ff00ff ease-in
+#ff00ff 0.33s
+#ff00ff 0.33s ease-in
+#ff00ff 0.33s ease-in 1s
+#ff00ff pulse 1s
+```
+
+An easing name without a duration uses the default 330 ms duration. Each line
+finishes after the longest delay plus duration on that line. A line with no
+duration, easing, or delay lasts one 60 Hz frame.
+
+## Easing
+
+Supported easing names:
+
+```text
+linear
+ease
+ease-in
+ease-out
+ease-in-out
+cosine
+pulse
+none
+```
+
+`cosine` is a smooth half-cosine transition from the line's start color to the
+target color. `pulse` is a full-cycle envelope: it moves from the line's start
+color to the target color and back to the start color over one duration. The
+target color is the peak, not the final hold.
+
+```text
+# fade to purple
+#ff00ff 0.33s cosine
+
+# pulse to purple and return to the current color
+#ff00ff 1.4s pulse
+
+# same pulse using the default 330 ms duration
+#ff00ff pulse
+```
+
+`none` jumps to the target after any delay and holds until the line finishes:
+
+```text
+3:#ffffff 80ms none
+```
+
+## Delays And Staggering
+
+Different LEDs can use independent timing on the same line:
+
+```text
+0:#ff00ff 0.33s ease-in 0s; 1:#00ff00 0.33s linear 250ms
+```
+
+Stagger all 8 LEDs:
+
+```text
+0:#ff0000 150ms ease 0ms; 1:#ff8000 150ms ease 50ms; 2:#ffff00 150ms ease 100ms; 3:#00ff00 150ms ease 150ms
+4:#00ccff 150ms ease 0ms; 5:#004cff 150ms ease 50ms; 6:#8800ff 150ms ease 100ms; 7:#ff00cc 150ms ease 150ms
+```
+
+## Repeat
+
+Loop forever from the first animation line:
+
+```text
+0:#ffffff 80ms none
+1:#ffffff 80ms none
+2:#ffffff 80ms none
+repeat
+```
+
+Run the animation before the repeat marker 10 total times, then hold the final
+state:
+
+```text
+#ff0000 200ms none
+#00ff00 200ms none
+repeat 10
+```
+
+Finite repeat can continue with more animation lines:
+
+```text
+off
+#ff0000 200ms none
+#00ff00 200ms none
+repeat 2
+off
+```
+
+## Examples
+
+Soft breathing pulse:
+
+```text
+#404040 1.4s pulse
+off 400ms none
+repeat
+```
+
+One-line chase step. Only LED 3 changes; all others hold:
+
+```text
+3:#ffffff 80ms none
+```
+
+Indexed sparkle:
+
+```text
+0:#ffffff 90ms none
+2:#ff00ee 90ms none
+5:#00ccff 90ms none
+off 120ms ease-out
+repeat
+```
+
+Compile-time LED count matters. On an 8 LED build, indexes `0` through `7` are
+valid. On a 2 LED build, only indexes `0` and `1` are valid, and color lists are
+clamped to those two LEDs.

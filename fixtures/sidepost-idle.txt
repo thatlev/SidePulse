@@ -1,0 +1,4 @@
+; idle sidepost
+#26D8FF 900ms cosine
+#22C5E8 900ms cosine
+repeat

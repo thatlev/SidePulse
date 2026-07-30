@@ -1,0 +1,2 @@
+; intentionally invalid - expect the red error blink
+#ff0000 200ms warp-speed

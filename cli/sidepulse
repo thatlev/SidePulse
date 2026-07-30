@@ -1,0 +1,90 @@
+#!/bin/sh
+# sidepulse — manual whole-strip presets for the SidePulse status light.
+#
+# AGENT STATUS is NOT handled here: lifecycle hooks pipe events into
+# `sidepulse-event`, the single writer of LEDS.TXT (see multiagent.md).
+# These presets are for one-off manual use; the next agent event reclaims
+# the strip.
+#
+# Writes are atomic (temp file + rename in the same directory) and single-shot —
+# the real device's firmware can wedge under partial or concurrent writes.
+# Migration to real hardware: export SIDEPULSE_FILE=/Volumes/SidePulse/LEDS.TXT
+
+set -eu
+
+FILE="${SIDEPULSE_FILE:-$HOME/sidepulse/LEDS.TXT}"
+
+usage() {
+    cat <<'EOF'
+usage: sidepulse <command>
+
+  thinking      comet sweep        working      aurora flow
+  done          solid green        attention    double-blink red
+  off           all LEDs off
+  raw '<DSL>'   arbitrary program (max 512 bytes, 10 lines)
+
+Agent session status (3 slots, 2 LEDs each) is driven by sidepulse-event —
+see multiagent.md. Manual state ops: sidepulse-event --status | --reset
+
+File: $SIDEPULSE_FILE (default ~/sidepulse/LEDS.TXT)
+EOF
+    exit 2
+}
+
+write_file() {
+    # $1 = program text. Atomic single write: temp file in target dir + rename.
+    dir=$(dirname "$FILE")
+    mkdir -p "$dir"
+    bytes=$(printf '%s\n' "$1" | wc -c | tr -d ' ')
+    lines=$(printf '%s\n' "$1" | wc -l | tr -d ' ')
+    if [ "$bytes" -gt 512 ]; then
+        echo "sidepulse: program is $bytes bytes (max 512)" >&2
+        exit 1
+    fi
+    if [ "$lines" -gt 10 ]; then
+        echo "sidepulse: program is $lines lines (max 10)" >&2
+        exit 1
+    fi
+    tmp=$(mktemp "$dir/.sidepulse.XXXXXX")
+    printf '%s\n' "$1" > "$tmp"
+    mv -f "$tmp" "$FILE"
+}
+
+[ $# -ge 1 ] || usage
+
+case "$1" in
+thinking)
+    write_file '; comet
+off 100ms none
+0:#35c8ff 400ms pulse 0ms; 1:#35c8ff 400ms pulse 90ms; 2:#35c8ff 400ms pulse 180ms; 3:#35c8ff 400ms pulse 270ms; 4:#35c8ff 400ms pulse 360ms; 5:#35c8ff 400ms pulse 450ms; 6:#35c8ff 400ms pulse 540ms; 7:#35c8ff 400ms pulse 630ms
+repeat'
+    ;;
+working)
+    write_file '; aurora
+0:#0b3d2e 1.8s cosine; 1:#0e5c43 1.8s cosine 0.15s; 2:#11866b 1.8s cosine 0.3s; 3:#0f6f8f 1.8s cosine 0.45s; 4:#155e9e 1.8s cosine 0.6s; 5:#3b4bb8 1.8s cosine 0.75s; 6:#5d3fae 1.8s cosine 0.9s; 7:#7a2f9e 1.8s cosine 1.05s
+0:#7a2f9e 1.8s cosine; 1:#5d3fae 1.8s cosine 0.15s; 2:#3b4bb8 1.8s cosine 0.3s; 3:#155e9e 1.8s cosine 0.45s; 4:#0f6f8f 1.8s cosine 0.6s; 5:#11866b 1.8s cosine 0.75s; 6:#0e5c43 1.8s cosine 0.9s; 7:#0b3d2e 1.8s cosine 1.05s
+repeat'
+    ;;
+done)
+    write_file '; done
+#30d158 250ms ease-out'
+    ;;
+attention)
+    write_file '; needs you
+#ff3b30 120ms none
+off 120ms none
+#ff3b30 120ms none
+off 900ms none
+repeat'
+    ;;
+off)
+    write_file 'off 0ms none'
+    ;;
+raw)
+    [ $# -ge 2 ] || { echo "sidepulse: raw needs a program argument" >&2; exit 2; }
+    write_file "$2"
+    ;;
+*)
+    usage
+    ;;
+esac

@@ -1,0 +1,4 @@
+; comet
+off 100ms none
+0:#35c8ff 400ms pulse 0ms; 1:#35c8ff 400ms pulse 90ms; 2:#35c8ff 400ms pulse 180ms; 3:#35c8ff 400ms pulse 270ms; 4:#35c8ff 400ms pulse 360ms; 5:#35c8ff 400ms pulse 450ms; 6:#35c8ff 400ms pulse 540ms; 7:#35c8ff 400ms pulse 630ms
+repeat

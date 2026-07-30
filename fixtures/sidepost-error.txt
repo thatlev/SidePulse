@@ -1,0 +1,6 @@
+; error sidepost
+#FF2D20 90ms none
+off 90ms none
+#FF2D20 90ms none
+off 600ms none
+repeat

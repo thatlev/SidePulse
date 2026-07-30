@@ -1,0 +1,4 @@
+; working
+off 80ms none
+0:#30D158 380ms pulse 0ms; 1:#30D158 380ms pulse 80ms; 2:#30D158 380ms pulse 160ms; 3:#30D158 380ms pulse 240ms; 4:#30D158 380ms pulse 320ms; 5:#30D158 380ms pulse 400ms; 6:#30D158 380ms pulse 480ms; 7:#30D158 380ms pulse 560ms
+repeat

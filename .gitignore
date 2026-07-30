@@ -1,0 +1,52 @@
+# ── macOS junk ───────────────────────────────────────────────────────────────
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+
+# ── Xcode / Swift build & per-user state ─────────────────────────────────────
+build/
+.build/
+dist/
+*.app
+DerivedData/
+*.xcuserstate
+*.xcuserdatad/
+xcuserdata/
+.swiftpm/
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# ── Editor / workstation-local identity (per-agent window theming, etc.) ──────
+# .vscode holds per-workstation window-title colors that identify each agent
+# tab locally; it is not part of the shippable product. Delete this line if you
+# deliberately want to share the theme.
+.vscode/
+
+# ── SidePulse runtime data (normally lives in ~/sidepulse & ~/Library/Caches,
+#    outside this repo — these patterns are defensive in case a copy lands here)
+LEDS.TXT
+write-log.csv
+server.log
+status.json
+*.lock
+
+# ── Secrets & agent/host-specific config that must never be committed ─────────
+# Nothing here is tracked today; these keep local hook/agent config and any
+# credentials out of the repo if they ever get dropped in.
+.env
+.env.*
+*.bak-sidepulse
+settings.local.json
+.claude/settings.local.json
+secrets.json
+*.pem
+*.p8
+*.p12
+*.mobileprovision
+DISABLE_PLAN.md
+multiagent.md
+spec.md

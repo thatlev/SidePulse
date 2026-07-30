@@ -1,0 +1,6 @@
+; finite repeat with trailing lines
+off
+#ff0000 200ms none
+#00ff00 200ms none
+repeat 2
+off

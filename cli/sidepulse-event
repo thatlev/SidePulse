@@ -1,0 +1,389 @@
+#!/usr/bin/env python3
+"""sidepulse-event — the single writer of LEDS.TXT (multiagent.md spec).
+
+Agent lifecycle hooks (Claude Code, Kimi CLI, Codex notify) invoke this helper
+and pipe their event JSON on stdin. It maintains up to three session slots on
+the 8-LED strip and renders the complete strip on every change:
+
+  LED 0-1 = slot 0 · LED 2 = separator · LED 3-4 = slot 1
+  LED 5 = separator · LED 6-7 = slot 2
+
+Both LEDs of a slot show the same status color; separators and empty slots are
+off. Statuses persist until the session's next event (static colors, written
+once — the firmware animates nothing, so this costs ~zero ongoing I/O).
+
+  idle        #FAFAFA  session open, not working
+  thinking    #9CB6F6  processing / using tools
+  complete    #B5E3BA  turn finished successfully
+  needs_input #F6E19D  permission / answer required
+  error       #F0A2BB  turn or API failed
+
+Guarantees (per spec):
+  - state locked (flock) in ~/Library/Caches/SidePulse/status.json
+  - slots preserved until SessionEnd or safe eviction (LRU among
+    idle/complete/error; thinking/needs_input are never evicted)
+  - LEDS.TXT written once per change, atomic, skipped when unchanged
+  - exits 0 on ANY failure — lighting never interrupts an agent
+
+Usage: sidepulse-event [provider] < event.json
+       sidepulse-event --status | --reset
+       sidepulse-event --claim N [--session ID]   # pin session to slot N (1-3)
+Provider label comes from $SIDEPULSE_PROVIDER if set, else argv[1].
+Set SIDEPULSE_REVERSE=1 to flip LED order (physical strip orientation).
+"""
+import fcntl
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import time
+
+STATE_DIR = os.path.abspath(os.path.expanduser(
+    os.environ.get("SIDEPULSE_STATE_DIR", "~/Library/Caches/SidePulse")))
+STATUS_FILE = os.path.join(STATE_DIR, "status.json")
+LOCK_FILE = os.path.join(STATE_DIR, ".lock")
+SOLO_OWNER_FILE = os.path.join(STATE_DIR, "solo-owner")
+LEDS_FILE = os.path.abspath(os.path.expanduser(
+    os.environ.get("SIDEPULSE_FILE", "~/sidepulse/LEDS.TXT")))
+
+COLORS = {
+    "idle": "#FAFAFA",
+    "thinking": "#9CB6F6",
+    "complete": "#B5E3BA",
+    "needs_input": "#F6E19D",
+    "error": "#F0A2BB",
+}
+OFF = "#000000"
+# Each slot's FIRST LED shows the agent brand (stable per provider); the SECOND
+# shows live status. Brand colors are saturated so they read distinctly from the
+# pastel status colors above.
+BRAND = {
+    "claude": "#D97757",  # Anthropic clay/coral
+    "codex": "#10A37F",   # OpenAI green
+    "kimi": "#8B5CF6",    # Moonshot violet
+}
+BRAND_UNKNOWN = "#6E6E6E"  # provider not recognized: grey
+STALE_SECS = 180    # active status with no update in this long -> faded + evictable
+DEAD_SECS = 1800    # session with no update in this long -> pruned entirely
+ACTIVE = ("thinking", "needs_input")  # states that mean "currently engaged"
+RELEASABLE = ("idle", "complete", "error")  # safe to evict
+EVENT_STATUS = {
+    "sessionstart": "idle",
+    "userpromptsubmit": "thinking",
+    "permissionrequest": "needs_input",
+    "notification": "needs_input",   # permission/input notification
+    "permissionresult": "thinking",  # approval done, back to work
+    "posttooluse": "thinking",
+    "stop": "complete",
+    "stopfailure": "error",
+    "interrupt": "idle",             # Kimi: Esc cancels the turn (no Stop fires)
+    "agent-turn-complete": "complete",  # Codex notify
+    "turn-ended": "complete",
+}
+END_EVENTS = ("sessionend",)
+SLOT_LEDS = ((0, 1), (3, 4), (6, 7))
+SEPARATORS = (2, 5)
+REVERSE = os.environ.get("SIDEPULSE_REVERSE") == "1"
+
+
+def load_state(lockf):
+    try:
+        with open(STATUS_FILE) as f:
+            state = json.load(f)
+        if isinstance(state.get("sessions"), dict):
+            return state
+    except (OSError, ValueError):
+        pass
+    return {"sessions": {}, "render": ""}
+
+
+def save_state(state):
+    os.makedirs(STATE_DIR, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=STATE_DIR, prefix=".status.")
+    with os.fdopen(fd, "w") as f:
+        json.dump(state, f, indent=1)
+    os.replace(tmp, STATUS_FILE)
+
+
+def session_key(provider, payload):
+    """Stable key for a session. Codex has no start/input hooks, so manual
+    events (AGENTS.md instructions) must merge with notify events: key by
+    project dir. Claude/Kimi carry real session_ids (one slot per tab)."""
+    cwd = payload.get("cwd") or os.getcwd()
+    if provider == "codex":
+        return "codex:" + cwd
+    sid = payload.get("session_id") or payload.get("conversation_id")
+    return str(sid) if sid else "%s:%s" % (provider, cwd)
+
+
+def event_name(payload):
+    for field in ("hook_event_name", "event", "type"):
+        v = payload.get(field)
+        if isinstance(v, str) and v:
+            return v.lower()
+    return ""
+
+
+def route_to_claimed_solo(provider, raw):
+    """Let an active single-agent claim arbitrate stale multi-agent hooks.
+
+    Switching modes historically left Codex/other provider hooks pointing at
+    sidepulse-event. Without this guard, their next event overwrote the whole-
+    strip solo animation with a sparse multi-agent slot render. A solo claim is
+    now authoritative: forward hook events to the sibling solo controller,
+    which also checks that the event cwd matches the claimed project.
+    """
+    try:
+        with open(SOLO_OWNER_FILE) as f:
+            if not f.read().strip():
+                return False
+    except OSError:
+        return False
+
+    helper = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          "sidepulse-solo")
+    if not os.path.isfile(helper):
+        return False
+    try:
+        subprocess.run([helper, provider], input=raw, text=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                       timeout=5, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return True
+
+
+def assign_slot(sessions, key, now):
+    """Slot for `key`. Uses a free slot if any, else evicts. Eviction prefers a
+    releasable (idle/complete/error) session; failing that, a *stale* active
+    session — one with no update in STALE_SECS, i.e. a zombie that never fired
+    its end event (common for Codex, which lacks lifecycle hooks). Only when all
+    three slots hold genuinely-recent thinking/needs-input sessions do we refuse
+    (return None) so a real, active agent is never bumped by a newcomer."""
+    if key in sessions and sessions[key].get("slot") is not None:
+        return sessions[key]["slot"]
+    used = {s.get("slot") for s in sessions.values() if s.get("slot") is not None}
+    for slot in range(3):
+        if slot not in used:
+            return slot
+    holders = [k for k, s in sessions.items() if s.get("slot") is not None]
+    releasable = [k for k in holders if sessions[k].get("status") in RELEASABLE]
+    stale = [k for k in holders
+             if now - sessions[k].get("updated", 0) >= STALE_SECS]
+    pool = releasable or stale
+    if not pool:
+        return None
+    evict_key = min(pool, key=lambda k: sessions[k].get("updated", 0))  # LRU
+    slot = sessions[evict_key].get("slot")
+    del sessions[evict_key]
+    return slot
+
+
+def dim(hex_color, factor):
+    """Scale an #RRGGBB color toward black by `factor` (0..1)."""
+    try:
+        r, g, b = (int(hex_color[i:i + 2], 16) for i in (1, 3, 5))
+    except (ValueError, IndexError):
+        return hex_color
+    return "#%02X%02X%02X" % (int(r * factor), int(g * factor), int(b * factor))
+
+
+def render(state, now):
+    """Whole-strip LEDS.TXT: one line, every LED assigned, static colors.
+
+    Each slot spans two LEDs: the first shows the agent brand (stable per
+    provider), the second shows live status. A thinking/needs-input session
+    that hasn't reported in STALE_SECS is faded, so a stalled or dead agent
+    never masquerades as actively working."""
+    sessions = state["sessions"]
+    parts = []
+    summary = []
+    for slot, leds in enumerate(SLOT_LEDS):
+        sess = next((s for s in sessions.values() if s.get("slot") == slot), None)
+        if sess:
+            brand = BRAND.get(sess["provider"], BRAND_UNKNOWN)
+            status = COLORS[sess["status"]]
+            if (sess["status"] in ACTIVE
+                    and now - sess.get("updated", 0) >= STALE_SECS):
+                status = dim(status, 0.30)  # no recent activity: fade it
+        else:
+            brand = status = OFF
+        if REVERSE:
+            leds = (7 - leds[1], 7 - leds[0])
+        parts.append("%d:%s 300ms ease-out" % (leds[0], brand))   # brand LED
+        parts.append("%d:%s 300ms ease-out" % (leds[1], status))  # status LED
+        summary.append("s%d=%s" % (
+            slot, "%s/%s" % (sess["provider"], sess["status"]) if sess else "-"))
+    for i in SEPARATORS:
+        parts.append("%d:%s 300ms ease-out" % (i, OFF))
+    parts.sort(key=lambda p: int(p.split(":", 1)[0]))
+    return "; %s\n%s\n" % (" ".join(summary), "; ".join(parts))
+
+
+def write_leds(text):
+    """Single open-write-close, atomic (temp + rename). Returns False when
+    the strip is disconnected (target directory missing) — the caller then
+    leaves state['render'] stale so the next event retries the write."""
+    if len(text.encode()) > 512:
+        return False
+    directory = os.path.dirname(LEDS_FILE)
+    if not os.path.isdir(directory):
+        return False
+    fd, tmp = tempfile.mkstemp(dir=directory, prefix=".leds.")
+    with os.fdopen(fd, "w") as f:
+        f.write(text)
+    os.replace(tmp, LEDS_FILE)
+    return True
+
+
+def handle(provider, payload):
+    os.makedirs(STATE_DIR, exist_ok=True)
+    with open(LOCK_FILE, "w") as lockf:
+        fcntl.flock(lockf, fcntl.LOCK_EX)
+        state = load_state(lockf)
+        sessions = state["sessions"]
+        now = time.time()
+
+        # Drop long-dead sessions (closed without SessionEnd) so they never
+        # hold a slot or clutter --status.
+        for dead in [k for k, s in sessions.items()
+                     if now - s.get("updated", 0) >= DEAD_SECS]:
+            del sessions[dead]
+
+        name = event_name(payload)
+        key = session_key(provider, payload)
+
+        if name in END_EVENTS:
+            sessions.pop(key, None)
+        elif name in EVENT_STATUS:
+            slot = assign_slot(sessions, key, now)
+            if slot is not None:
+                status = EVENT_STATUS[name]
+                # SessionStart re-fires on resume/compact/clear mid-work. Don't
+                # reset an already-tracked session to idle — keep it showing
+                # whatever it was doing (thinking stays blue, not white).
+                if name == "sessionstart" and sessions.get(key, {}).get("status"):
+                    status = sessions[key]["status"]
+                sessions[key] = {
+                    "slot": slot,
+                    "status": status,
+                    "provider": provider,
+                    "cwd": payload.get("cwd") or os.getcwd(),
+                    "updated": now,
+                    "event": name,
+                }
+        else:
+            return  # unknown event: leave everything untouched
+
+        text = render(state, now)
+        if text != state.get("render"):
+            if write_leds(text):
+                state["render"] = text
+        save_state(state)
+
+
+def claim(target_1based, session_id=None, cwd=None):
+    """Pin a session to a specific slot (1-based: 1->LED0-1, 2->LED3-4,
+    3->LED6-7). The claimant is the session matching `session_id`, else the
+    most-recently-updated session whose cwd matches. If another session holds
+    the target slot, the two sessions swap slots so neither vanishes. Slots are
+    already sticky per session, so the move persists without extra state."""
+    try:
+        target = int(target_1based) - 1
+    except (TypeError, ValueError):
+        print("sidepulse-event: --claim needs a slot number 1-3", file=sys.stderr)
+        return 2
+    if target not in (0, 1, 2):
+        print("sidepulse-event: slot out of range (use 1, 2, or 3)", file=sys.stderr)
+        return 2
+
+    os.makedirs(STATE_DIR, exist_ok=True)
+    with open(LOCK_FILE, "w") as lockf:
+        fcntl.flock(lockf, fcntl.LOCK_EX)
+        state = load_state(lockf)
+        sessions = state["sessions"]
+
+        key = None
+        if session_id and session_id in sessions:
+            key = session_id
+        else:
+            want = os.path.realpath(cwd or os.getcwd())
+            matches = [(s.get("updated", 0), k) for k, s in sessions.items()
+                       if os.path.realpath(s.get("cwd", "")) == want]
+            if matches:
+                key = max(matches)[1]
+        if key is None:
+            print("sidepulse-event: no active session found to claim slot "
+                  "%d (session must have started first)" % (target + 1),
+                  file=sys.stderr)
+            return 1
+
+        cur = sessions[key].get("slot")
+        if cur == target:
+            return 0  # already there
+        occupant = next((k for k, s in sessions.items()
+                         if s.get("slot") == target), None)
+        if occupant is not None:
+            sessions[occupant]["slot"] = cur   # swap (cur may be None)
+        sessions[key]["slot"] = target
+
+        text = render(state, time.time())
+        if text != state.get("render"):
+            if write_leds(text):
+                state["render"] = text
+        save_state(state)
+    return 0
+
+
+def main():
+    if "--claim" in sys.argv:
+        i = sys.argv.index("--claim")
+        slot = sys.argv[i + 1] if i + 1 < len(sys.argv) else None
+        session_id = None
+        if "--session" in sys.argv:
+            j = sys.argv.index("--session")
+            session_id = sys.argv[j + 1] if j + 1 < len(sys.argv) else None
+        try:
+            return claim(slot, session_id=session_id)
+        except Exception:
+            return 0  # never interrupt an agent
+    if "--status" in sys.argv:
+        try:
+            with open(STATUS_FILE) as f:
+                print(f.read())
+        except OSError:
+            print("{}")
+        return 0
+    if "--reset" in sys.argv:
+        try:
+            os.remove(STATUS_FILE)
+        except OSError:
+            pass
+        handle("manual", {"hook_event_name": "SessionEnd", "session_id": "x"})
+        return 0
+
+    provider = os.environ.get("SIDEPULSE_PROVIDER", "")
+    if not provider:
+        args = [a for a in sys.argv[1:] if not a.startswith("--")]
+        provider = args[0] if args else "unknown"
+
+    raw = sys.stdin.read()
+    if route_to_claimed_solo(provider, raw):
+        return 0
+    try:
+        payload = json.loads(raw) if raw.strip() else {}
+        if not isinstance(payload, dict):
+            payload = {}
+    except ValueError:
+        payload = {}
+
+    try:
+        handle(provider, payload)
+    except Exception:
+        pass  # spec: exit successfully — lighting never interrupts an agent
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
