@@ -14,25 +14,36 @@ turns up, nothing in the workflow changes except a file path.
 
 ---
 
-## 1. Install the Mac app
+## 1. Build the Mac app
 
-Grab `SidePulse.app.zip` from [Releases](../../releases), unzip it, drag it to
-Applications.
+There is no download — you compile it. It has no dependencies, so Xcode's
+command line tools are enough (`xcode-select --install`). macOS 13 or newer.
 
-It is ad-hoc signed rather than notarised, so the first launch takes one extra
-step: **right-click the app, choose Open, then Open again.** macOS only asks
-once.
+```sh
+git clone https://github.com/thatlev/SidePulse.git
+cd SidePulse/macos/SidePulseMac
+./build.sh --install --run
+```
+
+That builds a release binary, assembles `SidePulse.app` around it, generates
+the icon, ad-hoc signs it, copies it to `/Applications` and launches it.
+
+Variants, if you want the steps separately:
+
+```sh
+./build.sh              # build only -> dist/SidePulse.app
+./build.sh --install    # also copy to /Applications
+./build.sh --debug      # unoptimised, for debugging
+```
+
+The ad-hoc signature matters even locally: without a stable code signature
+macOS re-asks for local-network permission on every launch, because the
+identity the grant is keyed to keeps changing. It is not a Developer ID
+signature, which is the other reason you build it yourself rather than
+download it.
 
 There is no window and no Dock icon. Look for a row of small LED dots in your
 menu bar — that is the entire app. Click it for the panel.
-
-Rather build it yourself:
-
-```sh
-cd macos/SidePulseMac && ./build.sh --install --run
-```
-
-Needs macOS 13 or newer. No dependencies.
 
 ## 2. Wire up your agents
 
@@ -53,22 +64,34 @@ SidePulse and never spend a token on it.
 
 Codex reviews new hooks once. Run `/hooks` inside Codex after connecting.
 
-## 3. Install the iPhone app
+## 3. Build the iPhone app
 
-There is no App Store build. It is an Xcode project you sign yourself.
+Also compiled yourself — there is no App Store build. This one needs full
+Xcode, not just the command line tools.
 
 ```sh
 open ios/SidePulseSim/SidePulseSim.xcodeproj
 ```
 
 Under *Signing & Capabilities* pick your own team — the committed one is an
-empty placeholder. Build to the simulator or your phone.
+empty placeholder. Then Cmd-R for the simulator, or select your phone as the
+run destination to put it on the device. Running on your own phone only needs a
+free Apple ID; see [Sideloading to a physical
+iPhone](#sideloading-to-a-physical-iphone) for the details.
+
+From the command line instead:
+
+```sh
+cd ios/SidePulseSim
+xcodebuild -project SidePulseSim.xcodeproj -scheme SidePulseSim \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build
+```
 
 Keep the phone on the same Wi-Fi as the Mac and allow the Local Network prompt.
 It finds the Mac over Bonjour by itself; there is no address to type. Tap the
 screen to switch between the 8-LED strip and the 2-LED Side Post.
 
-This part is optional. The menu bar item shows the same strip.
+This step is optional — the menu bar item shows the same strip.
 
 ## Using it
 
@@ -732,27 +755,41 @@ swiftc -O -o /tmp/hookstests \
 The build above is correct but **ad-hoc signed**, which is fine on the machine
 that built it and nowhere else. To ship it to another Mac:
 
-**1 · Sign with a Developer ID.** Needs a paid Apple Developer account.
+**1 · Sign, notarise and package.** `macos/SidePulseMac/release.sh` does the
+whole distributable path: builds, signs with your Developer ID under the
+hardened runtime, wraps the app in a drag-to-Applications disk image, signs
+that too, notarises, staples the ticket and verifies the result the way
+Gatekeeper will.
 
 ```sh
-security find-identity -v -p codesigning        # find your identity
-codesign --force --deep --options runtime --timestamp \
-  --sign "Developer ID Application: YOUR NAME (TEAMID)" \
-  dist/SidePulse.app
+cd macos/SidePulseMac
+export SIDEPULSE_SIGN_IDENTITY="Developer ID Application: YOUR NAME (TEAMID)"
+export SIDEPULSE_NOTARY_PROFILE="SIDEPULSE_NOTARY"
+./release.sh                       # -> dist/SidePulse-<version>.dmg
 ```
 
-`--options runtime` enables the hardened runtime, which notarisation requires.
-
-**2 · Notarise and staple**, or Gatekeeper will refuse it on first launch:
+It needs two things set up once, and refuses to run without them:
 
 ```sh
-ditto -c -k --keepParent dist/SidePulse.app /tmp/SidePulse.zip
-xcrun notarytool submit /tmp/SidePulse.zip \
-  --apple-id "you@example.com" --team-id TEAMID \
-  --password "app-specific-password" --wait
-xcrun stapler staple dist/SidePulse.app
-spctl -a -vvv dist/SidePulse.app          # expect: accepted, source=Notarized Developer ID
+# A **Developer ID Application** certificate in your login keychain. An "Apple
+# Development" certificate is a different thing and cannot be notarised — it is
+# for running on your own registered devices. Create one in Xcode:
+#   Settings -> Accounts -> your Apple ID -> Manage Certificates -> + ->
+#   Developer ID Application       (needs Account Holder or Admin on the team)
+security find-identity -v -p codesigning        # copy the exact name
+
+# Notarisation credentials, stored in the keychain so the app-specific password
+# never lands in a script or a shell history.
+xcrun notarytool store-credentials "SIDEPULSE_NOTARY" \
+  --apple-id "you@example.com" \
+  --team-id "TEAMID" \
+  --password "abcd-efgh-ijkl-mnop"   # app-specific, from appleid.apple.com
 ```
+
+The hardened runtime (`--options runtime`) is what notarisation requires, and
+`--timestamp` keeps the signature valid after the certificate expires. Neither
+is optional. The app has no nested code, so `--deep` is neither needed nor
+wanted.
 
 **3 · Decide on sandboxing.** The app is intentionally **not** sandboxed: it
 reads an arbitrary path from `$SIDEPULSE_FILE` and writes `write-log.csv` next to
