@@ -1,12 +1,102 @@
-# SidePulse Sim
+# SidePulse
 
-An ambient **agent status light**. AI coding agents (Claude Code, Codex, Kimi)
-report their lifecycle through local hooks; a controller renders the state for
-either an 8-LED ATLD strip or a 2-LED Side Post, written to a plain-text
-`LEDS.TXT` in the exact format the real SidePulse hardware uses. A tiny Mac
-server serves that file over the LAN and an iPhone app renders the selected
-device in real time. When (if) the physical device arrives,
-**nothing in the agent workflow changes — only the file path** (`SIDEPULSE_FILE`).
+Your coding agents already know when they are working, when they are stuck, and
+when they are waiting on you. They just have no way to say so without you
+looking at the window. SidePulse turns that into a light.
+
+Claude Code, Codex and Kimi fire lifecycle hooks. A small controller turns each
+event into an LED program and writes it to a plain text file. The Mac app serves
+that file over your network; an iPhone next to the keyboard renders it as an LED
+strip. Glance instead of checking.
+
+The format is the one the real SidePulse hardware uses, so when a physical strip
+turns up, nothing in the workflow changes except a file path.
+
+---
+
+## 1. Install the Mac app
+
+Grab `SidePulse.app.zip` from [Releases](../../releases), unzip it, drag it to
+Applications.
+
+It is ad-hoc signed rather than notarised, so the first launch takes one extra
+step: **right-click the app, choose Open, then Open again.** macOS only asks
+once.
+
+There is no window and no Dock icon. Look for a row of small LED dots in your
+menu bar — that is the entire app. Click it for the panel.
+
+Rather build it yourself:
+
+```sh
+cd macos/SidePulseMac && ./build.sh --install --run
+```
+
+Needs macOS 13 or newer. No dependencies.
+
+## 2. Wire up your agents
+
+The lights run on hooks, so each agent needs a few lines in its config. Install
+the controller once:
+
+```sh
+./install.sh
+```
+
+Then open the menu bar panel and press **Connect all** under *Agents*. That
+merges SidePulse's hooks into the user-level config for Claude Code, Codex and
+Kimi — every project on the machine, no per-repo setup. **Remove all** takes
+them straight back out, and only ever removes entries SidePulse added.
+
+Nothing is written to `CLAUDE.md` or `AGENTS.md`. Your agents never read about
+SidePulse and never spend a token on it.
+
+Codex reviews new hooks once. Run `/hooks` inside Codex after connecting.
+
+## 3. Install the iPhone app
+
+There is no App Store build. It is an Xcode project you sign yourself.
+
+```sh
+open ios/SidePulseSim/SidePulseSim.xcodeproj
+```
+
+Under *Signing & Capabilities* pick your own team — the committed one is an
+empty placeholder. Build to the simulator or your phone.
+
+Keep the phone on the same Wi-Fi as the Mac and allow the Local Network prompt.
+It finds the Mac over Bonjour by itself; there is no address to type. Tap the
+screen to switch between the 8-LED strip and the 2-LED Side Post.
+
+This part is optional. The menu bar item shows the same strip.
+
+## Using it
+
+Nothing to launch. Start a task in any wired-up agent and watch:
+
+| Light | What it means |
+|---|---|
+| Green pulse sweeping left to right | Working |
+| Solid orange | Waiting for your approval |
+| Solid green | Turn finished |
+| Red double-blink | It failed |
+
+Run several agents at once and they will fight over one strip, since the last
+event wins. Claim it from the project you actually care about:
+
+```sh
+sidepulse-solo --claim      # run inside that project
+sidepulse-solo --who        # who owns it now
+sidepulse-solo --release    # back to whoever moved last
+```
+
+To see the colours without waiting for an agent: `sidepulse thinking`,
+`sidepulse working`, `sidepulse done`, `sidepulse attention`, `sidepulse off`.
+
+To stop it, press **Remove all** in the panel — that unhooks the agents and
+leaves everything installed. `./uninstall.sh` removes the lot.
+
+## How it works
 
 ```
 Claude Code / Codex / Kimi
@@ -31,7 +121,11 @@ iPhone app "SidePulse Sim" (SwiftUI, iOS 17+)
   · tap → choose ATLD · 8 or Side Post · 2 · renders at 60 fps
 ```
 
-DSL reference: [LEDS_FORMAT.txt](LEDS_FORMAT.txt).
+Every controller writes the same plain-text DSL:
+[LEDS_FORMAT.txt](LEDS_FORMAT.txt).
+
+The rest of this file is reference material — device profiles, the hook wiring
+done by hand, testing, and building from source.
 
 ## Controllers and device profiles
 
@@ -102,7 +196,7 @@ SidePulse in a global config is pulling agent attention where it isn't wanted.
 | `install.sh` / `uninstall.sh` | One-command onboarding / clean removal. |
 | `cli/sidepulse-event` | Agent-status controller — the single writer of `LEDS.TXT` for status. Installed at `~/bin/sidepulse-event`. |
 | `cli/sidepulse` | Manual whole-strip presets (`thinking`, `working`, `done`, …). Installed at `~/bin/sidepulse`. |
-| `macos/SidePulseMac/` | **The Mac app** — menu-bar SwiftUI app: same watcher + HTTP server + Bonjour, plus the live strip in the menu bar. No dependencies. |
+| `macos/SidePulseMac/` | **The Mac app** — menu-bar-only app: same watcher + HTTP server + Bonjour, plus the live strip in the menu bar. AppKit status item, SwiftUI popover. No dependencies. |
 | `server/sidepulse-server.py` | Headless equivalent of the Mac app (`:8571`, ETag/304, `/health`, Bonjour via `dns-sd`). Python stdlib only — use it on a headless Mac or in CI. |
 | `agents/install-claude-hooks.sh` | Idempotent installer for the Claude Code / VS Code / desktop hooks. |
 | `ios/SidePulseSim/` | Xcode project — one target, no dependencies. |
@@ -111,30 +205,13 @@ SidePulse in a global config is pulling agent attention where it isn't wanted.
 | `tools/test_sidepulse_event.py` | Controller test suite (93 checks). |
 | `tools/swift-tests/main.swift` | Parser/engine unit tests (run on macOS). |
 | `tools/swift-client-tests/main.swift` | App polling/recovery regression tests. |
+| `tools/swift-hooks-tests/main.swift` | Agent-config wiring tests (62 checks). Requires `$SIDEPULSE_AGENT_HOME` to point at a sandbox — it refuses to run otherwise. |
 
 Runtime data lives **outside** the repo and is git-ignored defensively:
 `~/sidepulse/LEDS.TXT`, `~/sidepulse/write-log.csv`, `~/sidepulse/server.log`,
 and `~/Library/Caches/SidePulse/status.json`.
 
 ---
-
-## Quick start (one command)
-
-```sh
-git clone <this-repo> sidepulse && cd sidepulse
-./install.sh
-```
-
-`install.sh` is idempotent and non-destructive — it installs the CLIs to
-`~/bin`, drops the server in `~/sidepulse/`, optionally registers the auto-start
-LaunchAgent and wires the Claude Code hooks (each step is prompted; existing
-config is backed up), then runs a smoke test. Flags: `--yes` (non-interactive),
-`--no-service`, `--no-hooks`, `--no-path`. Then build the iPhone app (step 4
-below). To remove everything later: `./uninstall.sh` (add `--purge` to also
-delete runtime data).
-
-The manual steps below are what `install.sh` automates — use them if you'd
-rather wire things up yourself.
 
 ## The Mac app
 
@@ -155,7 +232,8 @@ popover:
 | | |
 |---|---|
 | **Live strip** | The current program, rendered with the *same* parser and engine as the phone — so the Mac and the phone can never disagree about what a program means. |
-| **ATLD · 8 / Side Post · 2** | Preview either device profile. |
+| **ATLD · 8 / Side Post · 2** | Preview either device profile. This also sets how many LEDs the menu bar item shows. |
+| **Agents** | Wire each agent's hooks up, or take them out again, without a terminal — see below. |
 | **Writes seen / Requests served** | Whether agents are updating status, and whether the phone is actually polling. Nothing incrementing = nothing reaching the phone. |
 | **Last write / Last poll** | How stale the light is. |
 | **Reveal LEDS.TXT · Write log · Copy /health** | The three things otherwise needing a terminal. |
@@ -164,6 +242,97 @@ popover:
 Parse errors are shown in the popover, so a malformed program is diagnosable
 without picking the phone up. To start it at login: System Settings → General →
 Login Items → **+** → `/Applications/SidePulse.app`.
+
+There is **no window and no Dock icon** — `LSUIElement` plus
+`setActivationPolicy(.accessory)`. The status item is the entire UI, so
+double-clicking the app when it is already running looks like nothing happens;
+that is the app working. `--diagnose` prints whether the status item was placed
+and where, which is the quickest way to tell "not running" from "running but you
+cannot see it":
+
+```sh
+/Applications/SidePulse.app/Contents/MacOS/SidePulseMac --diagnose
+```
+
+It also opens the popover and reports whether the panel landed fully on screen,
+which is the only way to check placement — AppKit decides the frame at
+presentation time.
+
+If it reports a frame on screen but you still cannot see the item, the menu bar
+is full — macOS silently drops items that do not fit, especially under a notch.
+Quit another menu bar app, or use an item manager, to get it back.
+
+**Clicking the item toggles the panel, reliably.** A `.transient` popover
+dismisses itself when a click lands outside it — including a click on the status
+item itself — and that happens *before* the button's action runs. The action
+then sees a closed popover and opens it straight back up, so the panel flickers
+instead of closing. Whether the dismissal wins that race varies run to run,
+which is why it only misbehaved sometimes. A click arriving within 200 ms of a
+dismissal is treated as the same interaction and ignored. `--diagnose` replays
+the race and checks all nine cases, including that re-anchoring is never
+mistaken for a dismissal.
+
+**The panel follows the item when it resizes.** Switching between ATLD and Side
+Post changes the image width, so the status item gets narrower and the menu bar
+re-lays out and slides it sideways — out from under a panel that is pointing at
+it. AppKit has no API to move a shown popover, and nudging its window would
+leave the beak behind, so the panel is re-anchored instead. This also covers the
+item moving for any other reason, such as another app's status item appearing.
+
+**The popover is measured before it is shown.** An `NSPopover` handed an
+`NSHostingController` has a `contentSize` of zero until something sets it; it
+then gets positioned at that zero size and grown afterwards by SwiftUI, which
+anchors the panel so its top edge ends up above the menu bar and off screen.
+The panel is laid out and measured first, `contentSize` assigned, and the height
+clamped to the screen with a scrolling fallback so it can never overflow.
+
+**The status item is AppKit, not `MenuBarExtra`.** SwiftUI's `MenuBarExtra` only
+renders simple labels dependably; given an animated `Canvas` it can produce a
+blank or zero-width item, which is indistinguishable from a failed launch. The
+item is an `NSStatusItem` whose `NSImage` is redrawn at 20 fps from the same
+engine the popover and the phone use. Each LED draws an unlit chassis first, so
+an idle or all-off program still shows a visible, clickable row of dots instead
+of near-black dots on a near-black menu bar.
+
+### Wiring agents up from the popover
+
+The **Agents** section does from a button what
+`agents/install-claude-hooks.sh` and the README's Kimi/Codex instructions do by
+hand: it merges SidePulse's lifecycle hooks into each agent's **user-level**
+config, so every project on the machine is covered.
+
+| Agent | File it edits |
+|---|---|
+| Claude Code (CLI, VS Code extension, desktop app) | `~/.claude/settings.json` |
+| Codex | `~/.codex/hooks.json` |
+| Kimi CLI | `~/.kimi-code/config.toml` |
+
+**Connect** adds that agent's hooks, **Remove** takes them out, and
+**Connect all** / **Remove all** do the set. An agent whose config directory
+does not exist is shown as *Not installed* and cannot be toggled. **Controller**
+picks which helper the hooks call — `sidepulse-solo` (the whole strip is one
+agent) or `sidepulse-event` (3 slots), matching `install.sh` and
+`install.sh --multi`; switching it rewrites whatever is already connected.
+
+Three things make this safe to run against a config that already has hooks in
+it from other tools:
+
+- **Only SidePulse entries are ever removed.** Removal matches on the command
+  containing `sidepulse`, so unrelated hooks are untouched — and a block you
+  added by hand from this README is cleaned up too.
+- **Connecting twice replaces rather than stacks**, so the buttons are
+  idempotent and cannot leave you firing the light twice per event.
+- **A config that does not parse is refused, not overwritten.** You get an
+  error in the popover instead of a clobbered file.
+
+A backup is written before every change (`.bak-sidepulse` on connect,
+`.bak-sidepulse-remove` on remove). Codex asks you to approve new hooks once —
+run `/hooks` inside Codex after connecting.
+
+This is hooks only. It deliberately does **not** add anything to
+`~/.claude/CLAUDE.md`, `AGENTS.md` or any other instruction file: the lights are
+driven entirely by hooks, so agent-facing text would cost context in every
+session for no behavioural gain (see *Turning it off for agents*).
 
 **Choose one server, not both.** The app and `sidepulse-server.py` both want
 port 8571; whichever starts second reports the conflict. The app tells you so in
@@ -501,6 +670,24 @@ locally: without a stable code signature macOS re-asks for local-network
 permission on every launch, because the identity the grant is keyed to keeps
 changing.
 
+**Reviewing the popover's layout.** A menu bar popover cannot be screenshotted
+from a script — it needs assistive access and dismisses as soon as focus moves —
+so the app can put the same views in an ordinary window and capture itself:
+
+```sh
+BIN="$(swift build -c debug --show-bin-path)/SidePulseMac"
+"$BIN" --preview dark                          # open the panel in a window
+"$BIN" --preview light --snapshot /tmp/panel.png   # ...and capture it, then exit
+```
+
+It renders three popover states side by side (8 LEDs working, 2 LEDs approval,
+parse error while stopped), plus a band of the **real status-item images** over
+the menu bar material — the one thing a popover screenshot cannot tell you, and
+how the invisible-idle-item bug was caught. The capture goes through AppKit's own
+drawing rather than `ImageRenderer`, which silently drops `Picker(.segmented)`
+and friends. Point `$SIDEPULSE_AGENT_HOME` at a throwaway directory to preview
+the Agents section in any state without reading your real configs.
+
 `Sources/SidePulseMac/Shared/` holds **symlinks** to
 `ios/SidePulseSim/SidePulseSim/LEDSParser.swift` and `LEDEngine.swift`, not
 copies. One parser and one engine, two front ends — the Mac preview and the
@@ -530,6 +717,11 @@ swiftc -O -o /tmp/ledtests \
 swiftc -O -o /tmp/clienttests \
   ios/SidePulseSim/SidePulseSim/SidePulseClient.swift \
   tools/swift-client-tests/main.swift && /tmp/clienttests
+swiftc -O -o /tmp/hookstests \
+  macos/SidePulseMac/Sources/SidePulseMac/AgentHooks.swift \
+  tools/swift-hooks-tests/main.swift \
+  && SIDEPULSE_AGENT_HOME=/tmp/sidepulse-hooks-test \
+     /tmp/hookstests /tmp/sidepulse-hooks-test
 (cd macos/SidePulseMac && swift build -c release)
 ```
 
@@ -601,6 +793,11 @@ swiftc -O -o /tmp/ledtests \
 swiftc -O -o /tmp/clienttests \
   ios/SidePulseSim/SidePulseSim/SidePulseClient.swift \
   tools/swift-client-tests/main.swift && /tmp/clienttests  # 4 checks
+swiftc -O -o /tmp/hookstests \
+  macos/SidePulseMac/Sources/SidePulseMac/AgentHooks.swift \
+  tools/swift-hooks-tests/main.swift \
+  && SIDEPULSE_AGENT_HOME=/tmp/sidepulse-hooks-test \
+     /tmp/hookstests /tmp/sidepulse-hooks-test          # 62 checks
 sidepulse-event --status                    # live session/slot state
 curl -i http://localhost:8571/leds.txt      # 200 + ETag; re-GET w/ If-None-Match -> 304
 curl http://localhost:8571/health           # writes_seen counter

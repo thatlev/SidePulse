@@ -117,6 +117,23 @@ final class ServerModel: ObservableObject {
         }
     }
 
+    /// Fills in the published state a running server would produce, for
+    /// `--snapshot`. Deliberately does not start the watcher or bind a port, so
+    /// a snapshot run cannot collide with the copy already in the menu bar.
+    func seedForSnapshot(program: String,
+                         parseError: String?,
+                         state: LEDHTTPServer.State,
+                         writesSeen: Int,
+                         requestsServed: Int) {
+        self.program = program
+        self.parseError = parseError
+        self.serverState = state
+        self.writesSeen = writesSeen
+        self.requestsServed = requestsServed
+        lastWriteAt = Date().addingTimeInterval(-3)
+        lastRequestAt = Date().addingTimeInterval(-1)
+    }
+
     // MARK: - Menu actions
 
     func revealFileInFinder() {

@@ -42,7 +42,7 @@ struct LEDStripView: View {
     let program: String
     let ledCount: Int
     var diameter: CGFloat = 22
-    var spacing: CGFloat = 8
+    var spacing: CGFloat = 10
 
     @State private var box = EngineBox()
 
@@ -55,6 +55,9 @@ struct LEDStripView: View {
                     led(colors[i])
                 }
             }
+            // Centred rather than leading: with 2 LEDs the strip is a third of
+            // the stage's width, and hugging the left edge reads as a bug.
+            .frame(maxWidth: .infinity)
         }
         .padding(.vertical, 6)
     }
@@ -66,39 +69,67 @@ struct LEDStripView: View {
         return Circle()
             .fill(color)
             .frame(width: diameter, height: diameter)
-            .overlay(Circle().strokeBorder(.white.opacity(0.09), lineWidth: 0.5))
+            // A lit LED is brightest off-centre-top, where the die sits under
+            // the diffuser. Without this the disc reads as a flat sticker.
+            .overlay(
+                Circle()
+                    .fill(
+                        RadialGradient(
+                            colors: [.white.opacity(0.38 * intensity), .clear],
+                            center: UnitPoint(x: 0.36, y: 0.30),
+                            startRadius: 0,
+                            endRadius: diameter * 0.62
+                        )
+                    )
+            )
+            .overlay(Circle().strokeBorder(.white.opacity(0.10), lineWidth: 0.5))
             // The glow is what makes a flat disc read as a lit LED; scaling it
             // with intensity keeps dark LEDs looking genuinely off.
-            .shadow(color: color.opacity(0.65 * intensity), radius: diameter * 0.42)
+            .shadow(color: color.opacity(0.70 * intensity), radius: diameter * 0.46)
     }
 }
 
-/// The 8 LEDs shrunk into the menu bar. Deliberately slower than the popover
-/// (20 fps): it is always on screen, and the strip's animations are slow enough
-/// that the difference is invisible.
-struct MenuBarStrip: View {
+/// The dark panel the preview strip sits on, plus the program's own label.
+/// Reading as a screen rather than a flat black rectangle is the whole job:
+/// a vertical gradient, a specular top edge, and a hairline border.
+struct LEDStage: View {
     let program: String
-    @State private var box = EngineBox()
+    let ledCount: Int
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 0.05)) { timeline in
-            let now = timeline.date.timeIntervalSinceReferenceDate
-            let colors = box.colors(for: program, ledCount: 8, at: now)
-            Canvas { context, size in
-                let n = colors.count
-                guard n > 0 else { return }
-                let d = min(size.height, size.width / CGFloat(n) - 1)
-                let gap = (size.width - d * CGFloat(n)) / CGFloat(max(n - 1, 1))
-                for (i, rgb) in colors.enumerated() {
-                    let c = rgb.displayComponents(brightness: box.brightness)
-                    let rect = CGRect(x: CGFloat(i) * (d + gap),
-                                      y: (size.height - d) / 2,
-                                      width: d, height: d)
-                    context.fill(Path(ellipseIn: rect),
-                                 with: .color(Color(.sRGB, red: c.r, green: c.g, blue: c.b, opacity: 1)))
-                }
-            }
-            .frame(width: 46, height: 10)
+        VStack(spacing: 8) {
+            LEDStripView(program: program, ledCount: ledCount)
+            Text(programLabel)
+                .font(.system(size: 10, weight: .medium))
+                .tracking(0.5)
+                .foregroundStyle(.white.opacity(0.42))
+                .lineLimit(1)
         }
+        .padding(.vertical, 14)
+        .padding(.horizontal, 16)
+        .frame(maxWidth: .infinity)
+        .background(
+            LinearGradient(colors: [Theme.stageTop, Theme.stageBottom],
+                           startPoint: .top, endPoint: .bottom),
+            in: RoundedRectangle(cornerRadius: Theme.stageRadius, style: .continuous)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.stageRadius, style: .continuous)
+                .strokeBorder(
+                    LinearGradient(colors: [.white.opacity(0.16), .white.opacity(0.04)],
+                                   startPoint: .top, endPoint: .bottom),
+                    lineWidth: 0.5
+                )
+        )
+    }
+
+    /// Every program the controllers write opens with a `; name` comment, so
+    /// the stage can name the state without re-deriving it from the timeline.
+    private var programLabel: String {
+        let first = program.split(separator: "\n", omittingEmptySubsequences: true).first ?? ""
+        let trimmed = first.trimmingCharacters(in: .whitespaces)
+        guard trimmed.hasPrefix(";") else { return "no program" }
+        let name = trimmed.dropFirst().trimmingCharacters(in: .whitespaces)
+        return name.isEmpty ? "no program" : name.uppercased()
     }
 }
