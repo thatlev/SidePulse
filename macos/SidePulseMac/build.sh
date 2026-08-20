@@ -32,9 +32,14 @@ for arg in "$@"; do
   esac
 done
 
-echo "==> swift build -c $CONFIG ${ARCH_ARGS[*]}"
-swift build -c "$CONFIG" "${ARCH_ARGS[@]}"
-BIN="$(swift build -c "$CONFIG" "${ARCH_ARGS[@]}" --show-bin-path)/SidePulseMac"
+echo "==> swift build -c $CONFIG"
+if [ "${#ARCH_ARGS[@]}" -gt 0 ]; then
+  swift build -c "$CONFIG" "${ARCH_ARGS[@]}"
+  BIN="$(swift build -c "$CONFIG" "${ARCH_ARGS[@]}" --show-bin-path)/SidePulseMac"
+else
+  swift build -c "$CONFIG"
+  BIN="$(swift build -c "$CONFIG" --show-bin-path)/SidePulseMac"
+fi
 [ -x "$BIN" ] || { echo "build produced no binary at $BIN" >&2; exit 1; }
 
 echo "==> assembling $BUNDLE"
