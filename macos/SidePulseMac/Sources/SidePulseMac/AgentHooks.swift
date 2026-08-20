@@ -193,7 +193,7 @@ enum AgentHookError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unreadable(let path): return "Could not read \(AgentPaths.abbreviate(path))."
-        case .malformed(let path): return "\(AgentPaths.abbreviate(path)) is not valid — fix it by hand first."
+        case .malformed(let path): return "\(AgentPaths.abbreviate(path)) is not valid. Fix it by hand first."
         case .unwritable(let path): return "Could not write \(AgentPaths.abbreviate(path))."
         case .busy: return "StillOn or SidePulse is updating agent hooks. Try again."
         case .unsafeLock: return "The shared agent-hook lock is not safe to use."
@@ -254,7 +254,7 @@ enum AgentHooks {
                     // Inside the first table on purpose: a comment above the
                     // header would belong to the previous section and survive
                     // removal, accumulating one stale line per install.
-                    block += "# SidePulse status light — managed by the SidePulse menu bar app.\n"
+                    block += "# SidePulse status light, managed by the SidePulse menu bar app.\n"
                 }
                 block += "event = \(tomlString(event))\n"
                 block += "command = \(tomlString(command))\n"

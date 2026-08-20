@@ -131,7 +131,7 @@ struct MenuContent: View {
             .padding(.top, 1)
 
             if !agents.helperInstalled {
-                notice("No \(agents.controller.binaryName) in ~/bin — run ./install.sh first.",
+                notice("No \(agents.controller.binaryName) in ~/bin. Run ./install.sh first.",
                        color: Theme.attention)
             } else if let error = agents.errorMessage {
                 notice(error, color: Theme.fault)
@@ -281,7 +281,7 @@ struct MenuContent: View {
     }
 
     private func relative(_ date: Date?) -> String {
-        guard let date else { return "—" }
+        guard let date else { return "Not yet" }
         let seconds = Int(Date().timeIntervalSince(date))
         if seconds < 2 { return "just now" }
         if seconds < 60 { return "\(seconds)s ago" }

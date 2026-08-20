@@ -50,3 +50,6 @@ secrets.json
 DISABLE_PLAN.md
 multiagent.md
 spec.md
+
+# Private release checklist. Keep local observations out of the public repo.
+TEST.md

@@ -82,7 +82,7 @@ final class LEDHTTPServer {
 
     private static func describe(_ error: NWError, port: UInt16) -> String {
         if case .posix(let code) = error, code == .EADDRINUSE {
-            return "Port \(port) is already in use — the Python sidepulse-server "
+            return "Port \(port) is already in use. The Python sidepulse-server "
                  + "or another copy of this app is running."
         }
         return "\(error)"

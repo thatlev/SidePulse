@@ -351,10 +351,10 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
                 if let screen = NSScreen.screens.first(where: { $0.frame.intersects(window.frame) }) {
                     lines.append("on screen: \(screen.frame) (menu bar height \(screen.frame.maxY - screen.visibleFrame.maxY))")
                 } else {
-                    lines.append("WARNING: the item's window is not on any screen — the menu bar is full")
+                    lines.append("WARNING: the item's window is not on any screen; the menu bar is full")
                 }
             } else {
-                lines.append("WARNING: the button has no window — the item was not placed")
+                lines.append("WARNING: the button has no window; the item was not placed")
             }
         } else {
             lines.append("WARNING: the status item has no button")
