@@ -17,7 +17,6 @@ struct SidePulseOnboardingView: View {
 
     private enum Step: Int, CaseIterable {
         case welcome
-        case server
         case agents
         case iphone
         case finish
@@ -25,7 +24,6 @@ struct SidePulseOnboardingView: View {
         var title: String {
             switch self {
             case .welcome: return "Welcome"
-            case .server: return "Mac"
             case .agents: return "Agents"
             case .iphone: return "iPhone"
             case .finish: return "Finish"
@@ -99,25 +97,6 @@ struct SidePulseOnboardingView: View {
                     benefit("iphone", "Phone display")
                 }
             }
-        case .server:
-            centered {
-                heading(
-                    icon: model.isRunning ? "checkmark.circle.fill" : "network",
-                    color: model.isRunning ? Theme.live : Theme.attention,
-                    title: model.isRunning ? "The Mac bridge is live" : "Starting the Mac bridge",
-                    detail: model.isRunning
-                        ? "SidePulse is watching the light program and advertising it privately on your local network."
-                        : "The local server is starting. No account or cloud service is required."
-                )
-                if !model.isRunning {
-                    statusCard(
-                        title: "Starting…",
-                        detail: model.computerName,
-                        color: Theme.attention
-                    )
-                    Button("Try again") { model.restart() }
-                }
-            }
         case .agents:
             centered {
                 heading(
@@ -128,21 +107,11 @@ struct SidePulseOnboardingView: View {
                 )
 
                 if agents.helperInstalled {
-                    VStack(spacing: 10) {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("\(agents.connectedCount) of \(agents.installableProviders.count) available agents connected")
-                                    .font(.headline)
-                                Text("Claude Code and ChatGPT are detected from their local config folders.")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Button(agents.allConnected ? "Disconnect hooks" : "Connect hooks") {
-                                agents.toggleHooks()
-                            }
-                                .buttonStyle(.borderedProminent)
-                                .disabled(!agents.canToggleHooks)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("\(agents.connectedCount) of \(AgentProvider.primaryCases.count) agents connected")
+                            .font(.headline)
+                        ForEach(AgentProvider.primaryCases) { provider in
+                            onboardingAgentRow(provider)
                         }
                         if let error = agents.errorMessage {
                             Text(error)
@@ -191,7 +160,7 @@ struct SidePulseOnboardingView: View {
                     icon: "heart.fill",
                     color: .pink,
                     title: "Help SidePulse grow",
-                    detail: "Follow the build and star the repository. SidePulse only records that each link was opened."
+                    detail: "Follow the build and star the repository."
                 )
                 VStack(spacing: 10) {
                     supportButton(
@@ -246,7 +215,6 @@ struct SidePulseOnboardingView: View {
 
     private var canContinue: Bool {
         switch step {
-        case .server: return model.isRunning
         case .agents: return agents.connectedCount > 0 || completedPromptSteps.contains(.agents)
         case .iphone: return model.requestsServed > 0 || completedPromptSteps.contains(.iphone)
         case .finish: return openedX && openedGitHub
@@ -283,17 +251,35 @@ struct SidePulseOnboardingView: View {
         }
     }
 
-    private func statusCard(title: String, detail: String, color: Color) -> some View {
-        HStack(spacing: 12) {
-            StatusDot(color: color, size: 10, glow: true)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.headline)
-                Text(detail).font(.caption).foregroundStyle(.secondary)
-            }
+    private func onboardingAgentRow(_ provider: AgentProvider) -> some View {
+        let state = agents.status[provider] ?? .unavailable
+        return HStack(spacing: 10) {
+            ProviderBrandIcon(
+                provider: provider,
+                size: 18,
+                color: state == .connected ? Theme.live : .secondary
+            )
+            Text(provider.displayName)
+                .font(.system(size: 13, weight: .medium))
             Spacer()
+            switch state {
+            case .unavailable:
+                Text("Not available")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            case .connected:
+                Button("Disconnect") { agents.disconnect(provider) }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            case .disconnected:
+                Button("Connect") { agents.connect(provider) }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .disabled(!agents.helperInstalled)
+            }
         }
-        .padding(16)
-        .frame(maxWidth: 500)
+        .padding(.horizontal, 12)
+        .frame(minHeight: 42)
         .background(onboardingSurface)
     }
 
@@ -443,7 +429,7 @@ private struct SidePulseMark: View {
 }
 
 private enum URLs {
-    static let repository = URL(string: "https://github.com/thatlev/SidePulse")!
+    static let repository = URL(string: "https://thatlev.com/go/sidepulse/github")!
     static let mobileGuide = URL(string: "https://github.com/thatlev/SidePulse/blob/main/docs/MOBILE-SETUP.md")!
-    static let xProfile = URL(string: "https://x.com/thatlevco")!
+    static let xProfile = URL(string: "https://thatlev.com/go/sidepulse/x")!
 }

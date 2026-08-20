@@ -5,7 +5,7 @@ import AppKit
 import SwiftUI
 
 @MainActor
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private let model = ServerModel()
     private let agents = AgentHooksModel()
     private var menuBar: MenuBarController?
@@ -30,8 +30,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        menuBar = MenuBarController(model: model, agents: agents)
         model.start()
+        do {
+            try BundledHelpers.install()
+            agents.refresh()
+        } catch {
+            fputs("SidePulse helper install failed: \(error.localizedDescription)\n", stderr)
+        }
+        menuBar = MenuBarController(model: model, agents: agents)
 
         if arguments.contains("--onboarding-preview") {
             NSApp.setActivationPolicy(.regular)
@@ -95,6 +101,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.setContentSize(NSSize(width: 700, height: 560))
         window.minSize = NSSize(width: 660, height: 520)
         window.isReleasedWhenClosed = false
+        window.delegate = self
         window.center()
         onboardingWindow = NSWindowController(window: window)
 
@@ -111,5 +118,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.async { [weak self] in
             self?.menuBar?.openAfterOnboarding()
         }
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow,
+              window === onboardingWindow?.window else { return }
+        menuBar?.setRedrawsPaused(false)
     }
 }

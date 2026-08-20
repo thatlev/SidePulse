@@ -10,6 +10,7 @@
 // the problem.
 
 import AppKit
+import Combine
 import SwiftUI
 
 @MainActor
@@ -23,6 +24,8 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     /// disagree with either about what a program means.
     private let engine = EngineBox()
     private var redrawTimer: Timer?
+    private var programObservation: AnyCancellable?
+    private var redrawsPaused = false
 
     /// A menu-bar status item is snapshot-replicated by AppKit after every
     /// image change. 30 fps stays fluid without making that system work crowd
@@ -56,6 +59,13 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         popover.animates = false
 
         redraw()
+        programObservation = model.$program
+            .removeDuplicates()
+            .dropFirst()
+            .sink { [weak self] _ in
+                guard let self, !self.redrawsPaused else { return }
+                self.redraw()
+            }
         let timer = Timer(timeInterval: Self.redrawInterval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.redraw() }
         }
@@ -68,6 +78,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     deinit { redrawTimer?.invalidate() }
 
     func setRedrawsPaused(_ paused: Bool) {
+        redrawsPaused = paused
         redrawTimer?.fireDate = paused ? .distantFuture : Date()
         if !paused { redraw() }
     }
@@ -300,9 +311,8 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
 
         // Resolved up front rather than via `labelColor`: the drawing block runs
         // lazily, outside whatever appearance was current when we asked for it.
-        let chassis = isDark
-            ? NSColor(srgbRed: 1, green: 1, blue: 1, alpha: 0.34)
-            : NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.30)
+        let chassis = NSColor(srgbRed: 1, green: 1, blue: 1, alpha: isDark ? 0.62 : 0.82)
+        let chassisOutline = NSColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.34)
 
         let image = NSImage(size: size, flipped: false) { rect in
             let startX = (rect.width - span) / 2
@@ -317,6 +327,9 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
                 // never launched.
                 chassis.setFill()
                 path.fill()
+                chassisOutline.setStroke()
+                path.lineWidth = 0.5
+                path.stroke()
 
                 // The lit colour on top, faded in by how lit the LED is, so a
                 // dark program tints the chassis instead of erasing it.

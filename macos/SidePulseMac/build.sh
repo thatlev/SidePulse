@@ -9,6 +9,7 @@
 #   ./build.sh              release build -> dist/SidePulse.app
 #   ./build.sh --install    also copy into /Applications
 #   ./build.sh --run        also (re)launch it
+#   ./build.sh --universal  include Apple silicon and Intel
 set -euo pipefail
 
 cd "$(dirname "$0")"
@@ -18,20 +19,22 @@ APP_NAME="SidePulse"
 BUNDLE="dist/${APP_NAME}.app"
 DO_INSTALL=0
 DO_RUN=0
+ARCH_ARGS=()
 
 for arg in "$@"; do
   case "$arg" in
     --install) DO_INSTALL=1 ;;
     --run) DO_RUN=1 ;;
     --debug) CONFIG=debug ;;
+    --universal) ARCH_ARGS=(--arch arm64 --arch x86_64) ;;
     -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
 done
 
-echo "==> swift build -c $CONFIG"
-swift build -c "$CONFIG"
-BIN="$(swift build -c "$CONFIG" --show-bin-path)/SidePulseMac"
+echo "==> swift build -c $CONFIG ${ARCH_ARGS[*]}"
+swift build -c "$CONFIG" "${ARCH_ARGS[@]}"
+BIN="$(swift build -c "$CONFIG" "${ARCH_ARGS[@]}" --show-bin-path)/SidePulseMac"
 [ -x "$BIN" ] || { echo "build produced no binary at $BIN" >&2; exit 1; }
 
 echo "==> assembling $BUNDLE"
@@ -40,6 +43,10 @@ mkdir -p "$BUNDLE/Contents/MacOS" "$BUNDLE/Contents/Resources"
 cp "$BIN" "$BUNDLE/Contents/MacOS/SidePulseMac"
 cp Info.plist "$BUNDLE/Contents/Info.plist"
 printf 'APPL????' > "$BUNDLE/Contents/PkgInfo"
+mkdir -p "$BUNDLE/Contents/Resources/Helpers"
+for helper in sidepulse sidepulse-solo sidepulse-event; do
+  install -m 0755 "../../cli/$helper" "$BUNDLE/Contents/Resources/Helpers/$helper"
+done
 
 RESOURCE_BUNDLE="$(dirname "$BIN")/SidePulseMac_SidePulseMac.bundle"
 if [ -d "$RESOURCE_BUNDLE" ]; then

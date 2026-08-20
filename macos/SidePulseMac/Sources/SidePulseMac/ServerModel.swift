@@ -89,7 +89,14 @@ final class ServerModel: ObservableObject {
     private func poll() {
         let sig = LEDFile.signature()
         fileExists = sig != nil
-        guard let sig, sig != lastSignature else { return }
+        guard let sig else {
+            if lastSignature != nil {
+                lastSignature = nil
+                reloadProgram()
+            }
+            return
+        }
+        guard sig != lastSignature else { return }
         lastSignature = sig
         writeCounter.increment()
         writesSeen = writeCounter.value

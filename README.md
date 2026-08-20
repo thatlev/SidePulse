@@ -19,14 +19,15 @@
 ## 1. Install the Mac app
 
 One command downloads the latest source, builds it locally, verifies the app,
-installs it in `/Applications`, clears macOS quarantine, and launches it:
+installs it in `/Applications`, clears quarantine, and launches it:
 
 ```sh
 curl -fsSL https://thatlev.com/sidepulse.sh | sh
 ```
 
-It has no third-party runtime dependencies. Xcode's command-line tools are
-enough (`xcode-select --install`), and it requires macOS 13 or newer.
+It requires macOS 13 or newer and Xcode's command-line tools. The app includes
+its SidePulse helpers and keeps them current in `~/bin`; it does not require
+Homebrew, Node, or a separate helper install.
 
 To work from a checkout instead:
 
@@ -67,25 +68,18 @@ strip. Glance instead of checking.
 The format is the one the real SidePulse hardware uses, so when a physical strip
 turns up, nothing in the workflow changes except a file path.
 
-The Mac app now opens with a lightweight first-run guide. It verifies the local
-server, connects the agents already installed on the Mac, copies an agent-ready
-iPhone build prompt, and waits for a real phone request before calling the route
-connected. The complete manual and troubleshooting path is in
+The Mac app now opens with a lightweight first-run guide. It connects the
+agents installed on the Mac, copies an agent-ready iPhone build prompt, and
+waits for a real phone request before calling the route connected. The complete
+manual and troubleshooting path is in
 [docs/MOBILE-SETUP.md](docs/MOBILE-SETUP.md).
 
 ## 2. Connect Claude Code & ChatGPT
 
-The lights run on hooks, so each agent needs a few lines in its config. Install
-the controller once:
-
-```sh
-./install.sh
-```
-
-Then open the menu bar panel and press **Connect hooks** under *Agents*. That
-merges SidePulse's hooks into the user-level config for Claude Code and
-ChatGPT — every project on the machine, with no per-repo setup. The same button
-becomes **Disconnect hooks** when both are connected.
+The lights run on hooks. Open the menu bar panel and connect Claude Code and
+ChatGPT independently under *Agents*. Each available row has its own
+**Connect** or **Disconnect** button; an agent not installed on the Mac says
+**Not available**. The hooks cover every project with no per-repo setup.
 
 SidePulse recognizes only its exact helper commands and shares StillOn's
 configuration lock. Connecting or disconnecting SidePulse leaves StillOn and

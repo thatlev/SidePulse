@@ -86,17 +86,10 @@ struct MenuContent: View {
     private var agentsSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             SectionLabel(text: "Agents") {
-                HStack(spacing: 5) {
-                    Text("\(agents.connectedCount)/\(agents.installableProviders.count)")
-                        .font(.system(size: 10, weight: .medium))
-                        .monospacedDigit()
-                        .foregroundStyle(.secondary)
-                    Button(agents.allConnected ? "Disconnect hooks" : "Connect hooks") {
-                        agents.toggleHooks()
-                    }
-                    .buttonStyle(PillButtonStyle(prominent: !agents.allConnected))
-                    .disabled(!agents.canToggleHooks)
-                }
+                Text("\(agents.connectedCount)/\(AgentProvider.primaryCases.count)")
+                    .font(.system(size: 10, weight: .medium))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
             }
 
             Card(padding: 4) {
@@ -155,9 +148,11 @@ struct MenuContent: View {
         let connected = state == .connected
 
         return HStack(spacing: 9) {
-            Image(systemName: provider.symbol)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(connected ? Theme.live : Color.secondary)
+            ProviderBrandIcon(
+                provider: provider,
+                size: 15,
+                color: connected ? Theme.live : .secondary
+            )
                 .frame(width: 25, height: 25)
                 .background(
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
@@ -178,14 +173,15 @@ struct MenuContent: View {
 
             if available {
                 if connected {
-                    StatusDot(color: Theme.live, size: 6)
+                    Button("Disconnect") { agents.disconnect(provider) }
+                        .buttonStyle(PillButtonStyle())
                 } else {
-                    Text("Not connected")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
+                    Button("Connect") { agents.connect(provider) }
+                        .buttonStyle(PillButtonStyle(prominent: true))
+                        .disabled(!agents.helperInstalled)
                 }
             } else {
-                Text("Not installed")
+                Text("Not available")
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
             }
