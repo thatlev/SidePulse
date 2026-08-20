@@ -338,10 +338,13 @@ clamped to the screen with a scrolling fallback so it can never overflow.
 **The status item is AppKit, not `MenuBarExtra`.** SwiftUI's `MenuBarExtra` only
 renders simple labels dependably; given an animated `Canvas` it can produce a
 blank or zero-width item, which is indistinguishable from a failed launch. The
-item is an `NSStatusItem` whose `NSImage` is redrawn at 30 fps from the same
-engine the popover and the phone use. Each LED draws an unlit chassis first, so
-an idle or all-off program still shows a visible, clickable row of dots instead
-of near-black dots on a near-black menu bar.
+item is an `NSStatusItem` with one persistent layer-backed strip driven by the
+same engine the popover and the phone use. The tiny menu-bar preview is capped
+at 10 fps and publishes only visibly changed, 8-bit-quantized LED colors; it
+does not replace the status-item image or ask AppKit to replicate a fresh
+snapshot across every display each frame. Each LED draws an unlit chassis
+first, so an idle or all-off program still shows a visible, clickable row of
+dots instead of near-black dots on a near-black menu bar.
 
 ### Wiring agents up from the popover
 
@@ -395,13 +398,16 @@ The two are interchangeable on the wire: identical endpoints, byte-identical
 ETags, and the same `write-log.csv` schema and timestamp format, so you can move
 between them without the phone or your logs noticing.
 
-### Why polling and not a file-descriptor watch
+### Watching atomic file replacements efficiently
 
 The controllers write `LEDS.TXT` atomically — temp file plus rename — so the
 path gets a **new inode** on every update. A `DispatchSource` bound to the
-original descriptor would go silent after the first write. Both servers poll
-`(mtime_ns, size)` every 200 ms instead, which is also what makes the ETag
-cheap: it is a hash of that pair, never of the file body.
+original descriptor would go silent after the first write. The Mac app watches
+the containing directory instead, which survives those replacements, and uses
+a 30-second safety poll; it falls back to 200 ms polling only if the directory
+source cannot be opened. The portable Python server polls `(mtime_ns, size)`
+every 200 ms. The ETag stays cheap in both: it is a hash of that pair, never of
+the file body.
 
 ## Testing it
 

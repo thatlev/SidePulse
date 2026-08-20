@@ -16,6 +16,7 @@ import SwiftUI
 @MainActor
 final class MenuBarController: NSObject, NSPopoverDelegate {
     private let statusItem: NSStatusItem
+    private let stripView = StatusStripView()
     private let popover = NSPopover()
     private let model: ServerModel
     private let agents: AgentHooksModel
@@ -27,10 +28,12 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     private var programObservation: AnyCancellable?
     private var redrawsPaused = false
 
-    /// A menu-bar status item is snapshot-replicated by AppKit after every
-    /// image change. 30 fps stays fluid without making that system work crowd
-    /// out foreground UI animation on the main thread.
-    private static let redrawInterval: TimeInterval = 1.0 / 30.0
+    /// The status strip is deliberately slower than the phone display. Tiny
+    /// 5-point menu-bar dots do not benefit from display-rate animation, and
+    /// every changed status item must be composited onto every attached menu
+    /// bar. The persistent layer-backed view also ignores identical quantized
+    /// frames, so static portions of a program cost no WindowServer updates.
+    private static let redrawInterval: TimeInterval = 1.0 / 10.0
 
     private var ledCount: Int {
         let stored = UserDefaults.standard.integer(forKey: LEDPreview.storageKey)
@@ -50,10 +53,16 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         button.target = self
         button.action = #selector(statusItemClicked)
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
-        button.imagePosition = .imageOnly
-        button.imageScaling = .scaleNone
         button.toolTip = "SidePulse"
         button.setAccessibilityLabel("SidePulse")
+
+        stripView.translatesAutoresizingMaskIntoConstraints = false
+        button.addSubview(stripView)
+        NSLayoutConstraint.activate([
+            stripView.centerXAnchor.constraint(equalTo: button.centerXAnchor),
+            stripView.centerYAnchor.constraint(equalTo: button.centerYAnchor),
+            stripView.heightAnchor.constraint(equalToConstant: Self.imageHeight),
+        ])
 
         popover.behavior = .transient
         popover.animates = false
@@ -69,7 +78,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         let timer = Timer(timeInterval: Self.redrawInterval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.redraw() }
         }
-        timer.tolerance = 0.001
+        timer.tolerance = 0.03
         // .common so the strip keeps animating while a menu is tracking.
         RunLoop.main.add(timer, forMode: .common)
         redrawTimer = timer
@@ -287,14 +296,20 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     private func redraw() {
         guard let button = statusItem.button else { return }
         let now = Date().timeIntervalSinceReferenceDate
-        let colors = engine.colors(for: model.program, ledCount: ledCount, at: now)
-        button.image = Self.stripImage(
-            colors: colors,
-            brightness: engine.brightness,
-            isDark: button.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-        )
-        // The width above may have just changed; AppKit re-lays the menu bar out
-        // asynchronously, so the move is detected on a later tick.
+        let count = ledCount
+        let colors = engine.colors(for: model.program, ledCount: count, at: now)
+        let isDark = button.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        let contentWidth = Self.imageSize(ledCount: count).width
+        if stripView.ledCount != count {
+            stripView.setLEDCount(count, width: contentWidth)
+            // Match the horizontal breathing room AppKit previously added
+            // around the image while keeping the status item an easy target.
+            statusItem.length = contentWidth + 10
+        }
+        stripView.update(colors: colors, brightness: engine.brightness, isDark: isDark)
+
+        // Another status item can still move this one while the popover is
+        // open. Checking the frame is cheap and no longer republishes artwork.
         realignIfItemMoved()
     }
 
@@ -304,10 +319,16 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     /// Even a 2-LED strip has to stay an easy click target.
     private static let minimumWidth: CGFloat = 24
 
+    private static func imageSize(ledCount: Int) -> NSSize {
+        let count = max(ledCount, 1)
+        let span = CGFloat(count) * dotDiameter + CGFloat(count - 1) * dotGap
+        return NSSize(width: max(span, minimumWidth), height: imageHeight)
+    }
+
     static func stripImage(colors: [RGB], brightness: Double, isDark: Bool) -> NSImage {
         let count = max(colors.count, 1)
         let span = CGFloat(count) * dotDiameter + CGFloat(count - 1) * dotGap
-        let size = NSSize(width: max(span, minimumWidth), height: imageHeight)
+        let size = imageSize(ledCount: count)
 
         // Resolved up front rather than via `labelColor`: the drawing block runs
         // lazily, outside whatever appearance was current when we asked for it.
@@ -356,7 +377,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         var lines: [String] = []
         lines.append("status item length: \(statusItem.length)")
         if let button = statusItem.button {
-            lines.append("button image size: \(button.image?.size.debugDescription ?? "nil")")
+            lines.append("strip view size: \(stripView.frame.size.debugDescription)")
             lines.append("button frame: \(button.frame)")
             if let window = button.window {
                 lines.append("item window frame: \(window.frame)")
@@ -451,5 +472,151 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             && frame.minX >= visible.minX && frame.maxX <= visible.maxX
         lines.append(fullyOnScreen ? "RESULT: fully on screen" : "RESULT: CLIPPED")
         return lines.joined(separator: "\n")
+    }
+}
+
+/// A persistent status-item renderer. Replacing `NSStatusBarButton.image` for
+/// every animation frame makes AppKit rebuild and replicate the status item on
+/// every display. These tiny layers are created once; subsequent frames touch
+/// only LED colors that are visibly different after 8-bit quantization.
+private final class StatusStripView: NSView {
+    private struct Pixel: Equatable {
+        let red: UInt8
+        let green: UInt8
+        let blue: UInt8
+        let alpha: UInt8
+    }
+
+    private static let dotDiameter: CGFloat = 5
+    private static let dotGap: CGFloat = 2
+
+    private(set) var ledCount = 0
+    private var widthConstraint: NSLayoutConstraint?
+    private var chassisLayers: [CALayer] = []
+    private var lightLayers: [CALayer] = []
+    private var lastPixels: [Pixel] = []
+    private var lastIsDark: Bool?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        setAccessibilityElement(false)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        // The status button owns the entire click target.
+        nil
+    }
+
+    func setLEDCount(_ count: Int, width: CGFloat) {
+        let count = max(count, 1)
+        if widthConstraint == nil {
+            let constraint = widthAnchor.constraint(equalToConstant: width)
+            constraint.isActive = true
+            widthConstraint = constraint
+        } else {
+            widthConstraint?.constant = width
+        }
+        guard count != ledCount else { return }
+
+        ledCount = count
+        chassisLayers.forEach { $0.removeFromSuperlayer() }
+        lightLayers.forEach { $0.removeFromSuperlayer() }
+        chassisLayers.removeAll(keepingCapacity: true)
+        lightLayers.removeAll(keepingCapacity: true)
+
+        for _ in 0..<count {
+            let chassis = CALayer()
+            chassis.borderWidth = 0.5
+            layer?.addSublayer(chassis)
+            chassisLayers.append(chassis)
+
+            let light = CALayer()
+            layer?.addSublayer(light)
+            lightLayers.append(light)
+        }
+        lastPixels.removeAll(keepingCapacity: true)
+        lastIsDark = nil
+        needsLayout = true
+    }
+
+    override func layout() {
+        super.layout()
+        let span = CGFloat(ledCount) * Self.dotDiameter
+            + CGFloat(max(ledCount - 1, 0)) * Self.dotGap
+        let startX = (bounds.width - span) / 2
+        let y = (bounds.height - Self.dotDiameter) / 2
+        let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for index in 0..<ledCount {
+            let frame = NSRect(
+                x: startX + CGFloat(index) * (Self.dotDiameter + Self.dotGap),
+                y: y,
+                width: Self.dotDiameter,
+                height: Self.dotDiameter
+            )
+            for dot in [chassisLayers[index], lightLayers[index]] {
+                dot.frame = frame
+                dot.cornerRadius = Self.dotDiameter / 2
+                dot.contentsScale = scale
+            }
+        }
+        CATransaction.commit()
+    }
+
+    func update(colors: [RGB], brightness: Double, isDark: Bool) {
+        guard colors.count == ledCount else { return }
+        let pixels = colors.map { color -> Pixel in
+            let components = color.displayComponents(brightness: brightness)
+            let intensity = max(components.r, max(components.g, components.b))
+            return Pixel(
+                red: Self.quantize(components.r),
+                green: Self.quantize(components.g),
+                blue: Self.quantize(components.b),
+                alpha: Self.quantize(intensity)
+            )
+        }
+        guard pixels != lastPixels || isDark != lastIsDark else { return }
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        if isDark != lastIsDark {
+            let chassis = NSColor(
+                srgbRed: 1, green: 1, blue: 1,
+                alpha: isDark ? 0.62 : 0.82
+            ).cgColor
+            let outline = NSColor(
+                srgbRed: 0, green: 0, blue: 0, alpha: 0.34
+            ).cgColor
+            for layer in chassisLayers {
+                layer.backgroundColor = chassis
+                layer.borderColor = outline
+            }
+        }
+        for (index, pixel) in pixels.enumerated() where
+            index >= lastPixels.count || pixel != lastPixels[index] {
+            lightLayers[index].backgroundColor = NSColor(
+                srgbRed: CGFloat(pixel.red) / 255,
+                green: CGFloat(pixel.green) / 255,
+                blue: CGFloat(pixel.blue) / 255,
+                alpha: 1
+            ).cgColor
+            lightLayers[index].opacity = Float(pixel.alpha) / 255
+        }
+        CATransaction.commit()
+
+        lastPixels = pixels
+        lastIsDark = isDark
+    }
+
+    private static func quantize(_ value: Double) -> UInt8 {
+        UInt8((max(0, min(1, value)) * 255).rounded())
     }
 }
