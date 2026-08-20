@@ -352,7 +352,7 @@ clamped to the screen with a scrolling fallback so it can never overflow.
 **The status item is AppKit, not `MenuBarExtra`.** SwiftUI's `MenuBarExtra` only
 renders simple labels dependably; given an animated `Canvas` it can produce a
 blank or zero-width item, which is indistinguishable from a failed launch. The
-item is an `NSStatusItem` whose `NSImage` is redrawn at 60 fps from the same
+item is an `NSStatusItem` whose `NSImage` is redrawn at 30 fps from the same
 engine the popover and the phone use. Each LED draws an unlit chassis first, so
 an idle or all-off program still shows a visible, clickable row of dots instead
 of near-black dots on a near-black menu bar.

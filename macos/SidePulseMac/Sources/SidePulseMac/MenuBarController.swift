@@ -24,9 +24,10 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     private let engine = EngineBox()
     private var redrawTimer: Timer?
 
-    /// Match a standard display refresh. The previous 20 fps cap made moving
-    /// light programs visibly step even when the engine itself was smooth.
-    private static let redrawInterval: TimeInterval = 1.0 / 60.0
+    /// A menu-bar status item is snapshot-replicated by AppKit after every
+    /// image change. 30 fps stays fluid without making that system work crowd
+    /// out foreground UI animation on the main thread.
+    private static let redrawInterval: TimeInterval = 1.0 / 30.0
 
     private var ledCount: Int {
         let stored = UserDefaults.standard.integer(forKey: LEDPreview.storageKey)
@@ -65,6 +66,11 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     }
 
     deinit { redrawTimer?.invalidate() }
+
+    func setRedrawsPaused(_ paused: Bool) {
+        redrawTimer?.fireDate = paused ? .distantFuture : Date()
+        if !paused { redraw() }
+    }
 
     // MARK: - Click
 

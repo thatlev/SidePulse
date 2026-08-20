@@ -38,6 +38,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if arguments.contains("--onboarding-preview")
             || !UserDefaults.standard.bool(forKey: Self.completedOnboardingKey) {
+            menuBar?.setRedrawsPaused(true)
             showOnboarding()
         }
 
@@ -106,6 +107,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         UserDefaults.standard.set(true, forKey: Self.completedOnboardingKey)
         onboardingWindow?.close()
         onboardingWindow = nil
+        menuBar?.setRedrawsPaused(false)
         DispatchQueue.main.async { [weak self] in
             self?.menuBar?.openAfterOnboarding()
         }
