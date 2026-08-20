@@ -374,6 +374,14 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         present(from: button)
     }
 
+    /// Opens the real menu after first-run setup finishes, so the transition
+    /// ends on the live product instead of an empty desktop.
+    func openAfterOnboarding() {
+        guard !popover.isShown, let button = statusItem.button else { return }
+        agents.refresh()
+        present(from: button)
+    }
+
     /// Switches the preview mode the way the picker in the panel does, so
     /// `--diagnose` can prove the panel follows the item when it resizes.
     func setLEDCountForDiagnostics(_ count: Int) {

@@ -12,6 +12,12 @@ strip. Glance instead of checking.
 The format is the one the real SidePulse hardware uses, so when a physical strip
 turns up, nothing in the workflow changes except a file path.
 
+The Mac app now opens with a lightweight first-run guide. It verifies the local
+server, connects the agents already installed on the Mac, copies an agent-ready
+iPhone build prompt, and waits for a real phone request before calling the route
+connected. The complete manual and troubleshooting path is in
+[docs/MOBILE-SETUP.md](docs/MOBILE-SETUP.md).
+
 ---
 
 ## 1. Build the Mac app

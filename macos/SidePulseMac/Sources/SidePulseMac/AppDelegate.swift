@@ -2,12 +2,16 @@
 // development flags.
 
 import AppKit
+import SwiftUI
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let model = ServerModel()
     private let agents = AgentHooksModel()
     private var menuBar: MenuBarController?
+    private var onboardingWindow: NSWindowController?
+
+    private static let completedOnboardingKey = "SidePulse.completedOnboarding.v1"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let arguments = CommandLine.arguments
@@ -28,6 +32,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menuBar = MenuBarController(model: model, agents: agents)
         model.start()
+
+        if !UserDefaults.standard.bool(forKey: Self.completedOnboardingKey) {
+            showOnboarding()
+        }
 
         if arguments.contains("--diagnose") {
             print(menuBar?.diagnose() ?? "no status item")
@@ -67,5 +75,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         model.stop()
+    }
+
+    private func showOnboarding() {
+        let content = SidePulseOnboardingView(
+            model: model,
+            agents: agents,
+            onFinish: { [weak self] in self?.finishOnboarding() }
+        )
+        let controller = NSHostingController(rootView: content)
+        let window = NSWindow(contentViewController: controller)
+        window.title = "Set Up SidePulse"
+        window.styleMask = [.titled, .closable, .miniaturizable]
+        window.setContentSize(NSSize(width: 700, height: 560))
+        window.minSize = NSSize(width: 660, height: 520)
+        window.isReleasedWhenClosed = false
+        window.center()
+        onboardingWindow = NSWindowController(window: window)
+
+        NSApp.activate(ignoringOtherApps: true)
+        onboardingWindow?.showWindow(nil)
+        window.makeKeyAndOrderFront(nil)
+    }
+
+    private func finishOnboarding() {
+        UserDefaults.standard.set(true, forKey: Self.completedOnboardingKey)
+        onboardingWindow?.close()
+        onboardingWindow = nil
+        DispatchQueue.main.async { [weak self] in
+            self?.menuBar?.openAfterOnboarding()
+        }
     }
 }
