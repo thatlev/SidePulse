@@ -16,26 +16,6 @@
 
 ![SidePulse showing coding-agent status on an iPhone](docs/sidepulse-demo.gif)
 
-Your coding agents already know when they are working, when they are stuck, and
-when they are waiting on you. They just have no way to say so without you
-looking at the window. SidePulse turns that into a light.
-
-Claude Code and ChatGPT fire lifecycle hooks. A small controller turns each
-event into an LED program and writes it to a plain text file. The Mac app serves
-that file over your network; an iPhone next to the keyboard renders it as an LED
-strip. Glance instead of checking.
-
-The format is the one the real SidePulse hardware uses, so when a physical strip
-turns up, nothing in the workflow changes except a file path.
-
-The Mac app now opens with a lightweight first-run guide. It verifies the local
-server, connects the agents already installed on the Mac, copies an agent-ready
-iPhone build prompt, and waits for a real phone request before calling the route
-connected. The complete manual and troubleshooting path is in
-[docs/MOBILE-SETUP.md](docs/MOBILE-SETUP.md).
-
----
-
 ## 1. Install the Mac app
 
 One command downloads the latest source, builds it locally, verifies the app,
@@ -74,6 +54,24 @@ download it.
 
 There is no window and no Dock icon. Look for a row of small LED dots in your
 menu bar — that is the entire app. Click it for the panel.
+
+Your coding agents already know when they are working, when they are stuck, and
+when they are waiting on you. They just have no way to say so without you
+looking at the window. SidePulse turns that into a light.
+
+Claude Code and ChatGPT fire lifecycle hooks. A small controller turns each
+event into an LED program and writes it to a plain text file. The Mac app serves
+that file over your network; an iPhone next to the keyboard renders it as an LED
+strip. Glance instead of checking.
+
+The format is the one the real SidePulse hardware uses, so when a physical strip
+turns up, nothing in the workflow changes except a file path.
+
+The Mac app now opens with a lightweight first-run guide. It verifies the local
+server, connects the agents already installed on the Mac, copies an agent-ready
+iPhone build prompt, and waits for a real phone request before calling the route
+connected. The complete manual and troubleshooting path is in
+[docs/MOBILE-SETUP.md](docs/MOBILE-SETUP.md).
 
 ## 2. Connect Claude Code & ChatGPT
 
