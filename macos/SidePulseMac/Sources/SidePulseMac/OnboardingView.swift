@@ -7,7 +7,9 @@ struct SidePulseOnboardingView: View {
     let onFinish: () -> Void
 
     @State private var step = Step.welcome
-    @State private var copiedPrompt = false
+    @State private var completedPromptSteps: Set<Step> = []
+    @State private var copiedPromptStep: Step?
+    @State private var copyFeedbackGeneration = 0
     @State private var openedX = false
     @State private var openedGitHub = false
 
@@ -100,12 +102,12 @@ struct SidePulseOnboardingView: View {
                         ? "SidePulse is watching the light program and advertising it privately on your local network."
                         : "The local server is starting. No account or cloud service is required."
                 )
-                statusCard(
-                    title: model.isRunning ? "Ready on this Mac" : "Starting…",
-                    detail: model.computerName,
-                    color: model.isRunning ? Theme.live : Theme.attention
-                )
                 if !model.isRunning {
+                    statusCard(
+                        title: "Starting…",
+                        detail: model.computerName,
+                        color: Theme.attention
+                    )
                     Button("Try again") { model.restart() }
                 }
             }
@@ -147,10 +149,9 @@ struct SidePulseOnboardingView: View {
                         text: agentSetupPrompt,
                         linkTitle: "Read the setup guide",
                         link: URLs.mobileGuide,
-                        copied: copiedPrompt
+                        copied: copiedPromptStep == .agents
                     ) {
-                        copy(agentSetupPrompt)
-                        copiedPrompt = true
+                        copy(agentSetupPrompt, for: .agents)
                     }
                 }
             }
@@ -164,17 +165,14 @@ struct SidePulseOnboardingView: View {
                         ? "The phone has requested the live light program from this Mac."
                         : "Copy this prompt to your coding agent. It will build the app and stop when Xcode needs your signing approval."
                 )
-                if model.requestsServed > 0 {
-                    statusCard(title: "iPhone connected", detail: "Requests served: \(model.requestsServed)", color: Theme.live)
-                } else {
+                if model.requestsServed == 0 {
                     promptCard(
                         text: iphoneSetupPrompt,
                         linkTitle: "Open mobile setup guide",
                         link: URLs.mobileGuide,
-                        copied: copiedPrompt
+                        copied: copiedPromptStep == .iphone
                     ) {
-                        copy(iphoneSetupPrompt)
-                        copiedPrompt = true
+                        copy(iphoneSetupPrompt, for: .iphone)
                     }
                 }
             }
@@ -207,24 +205,31 @@ struct SidePulseOnboardingView: View {
                 Button("Back") { move(to: step.rawValue - 1) }
             }
             Spacer()
-            if step != .finish {
-                Button("Skip") { move(to: step.rawValue + 1) }
-                    .foregroundStyle(.secondary)
-            }
-            Button(step == .finish ? "Finish" : "Continue") {
+            Button(footerActionTitle) {
                 if step == .finish { onFinish() } else { move(to: step.rawValue + 1) }
             }
             .buttonStyle(.borderedProminent)
+            .tint(canContinue ? Theme.live : Color.gray)
             .keyboardShortcut(.defaultAction)
-            .disabled(!canContinue)
+            .disabled(step == .finish && !canContinue)
+            .accessibilityHint(
+                footerActionTitle == "Skip"
+                    ? "Move to the next setup step without completing this one."
+                    : "Complete this setup step and continue."
+            )
         }
+    }
+
+    private var footerActionTitle: String {
+        if step == .finish { return "Finish" }
+        return canContinue ? "Continue" : "Skip"
     }
 
     private var canContinue: Bool {
         switch step {
         case .server: return model.isRunning
-        case .agents: return agents.connectedCount > 0 || copiedPrompt
-        case .iphone: return model.requestsServed > 0 || copiedPrompt
+        case .agents: return agents.connectedCount > 0 || completedPromptSteps.contains(.agents)
+        case .iphone: return model.requestsServed > 0 || completedPromptSteps.contains(.iphone)
         case .finish: return openedX && openedGitHub
         case .welcome: return true
         }
@@ -290,9 +295,15 @@ struct SidePulseOnboardingView: View {
                 Link(linkTitle, destination: link).font(.caption)
                 Spacer()
                 Button(action: action) {
-                    Label(copied ? "Copied" : "Copy prompt", systemImage: copied ? "checkmark" : "doc.on.doc")
+                    ZStack {
+                        Label("Copy prompt", systemImage: "doc.on.doc")
+                            .opacity(copied ? 0 : 1)
+                        Label("Copied", systemImage: "checkmark")
+                            .opacity(copied ? 1 : 0)
+                    }
                 }
                 .buttonStyle(.borderedProminent)
+                .help(copied ? "Copied. Click to copy it again." : "Copy the complete setup prompt.")
             }
         }
         .padding(16)
@@ -326,13 +337,29 @@ struct SidePulseOnboardingView: View {
 
     private func move(to rawValue: Int) {
         guard let next = Step(rawValue: rawValue) else { return }
-        copiedPrompt = false
+        copiedPromptStep = nil
         withAnimation(.easeOut(duration: 0.2)) { step = next }
     }
 
-    private func copy(_ value: String) {
+    private func copy(_ value: String, for step: Step) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(value, forType: .string)
+        completedPromptSteps.insert(step)
+        copiedPromptStep = step
+        copyFeedbackGeneration += 1
+        let generation = copyFeedbackGeneration
+        NSAccessibility.post(
+            element: NSApp as Any,
+            notification: .announcementRequested,
+            userInfo: [
+                .announcement: "Setup prompt copied",
+                .priority: NSAccessibilityPriorityLevel.medium.rawValue,
+            ]
+        )
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) {
+            guard generation == copyFeedbackGeneration, copiedPromptStep == step else { return }
+            copiedPromptStep = nil
+        }
     }
 
     private var agentSetupPrompt: String {
