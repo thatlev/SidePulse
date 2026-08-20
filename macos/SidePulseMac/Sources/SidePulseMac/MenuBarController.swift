@@ -27,13 +27,23 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     private var redrawTimer: Timer?
     private var programObservation: AnyCancellable?
     private var redrawsPaused = false
+    private var animationDeadline = Date.distantPast
+    private var brightestFrame: CapturedFrame?
 
-    /// The status strip is deliberately slower than the phone display. Tiny
-    /// 5-point menu-bar dots do not benefit from display-rate animation, and
-    /// every changed status item must be composited onto every attached menu
-    /// bar. The persistent layer-backed view also ignores identical quantized
-    /// frames, so static portions of a program cost no WindowServer updates.
+    /// The menu-bar preview animates briefly when state changes, then freezes
+    /// on the brightest frame it saw. Any continuously changing status item
+    /// wakes the shared menu-bar scene on every display, including neighboring
+    /// apps' static icons. The phone remains the full-fidelity 60 fps display;
+    /// the Mac strip is an event-driven notification surface.
     private static let redrawInterval: TimeInterval = 1.0 / 10.0
+    private static let animationBurstDuration: TimeInterval = 2
+
+    private struct CapturedFrame {
+        let colors: [RGB]
+        let brightness: Double
+        let isDark: Bool
+        let score: Double
+    }
 
     private var ledCount: Int {
         let stored = UserDefaults.standard.integer(forKey: LEDPreview.storageKey)
@@ -72,24 +82,53 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             .removeDuplicates()
             .dropFirst()
             .sink { [weak self] _ in
-                guard let self, !self.redrawsPaused else { return }
-                self.redraw()
+                self?.beginAnimationBurst()
             }
-        let timer = Timer(timeInterval: Self.redrawInterval, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.redraw() }
-        }
-        timer.tolerance = 0.03
-        // .common so the strip keeps animating while a menu is tracking.
-        RunLoop.main.add(timer, forMode: .common)
-        redrawTimer = timer
+        beginAnimationBurst()
     }
 
     deinit { redrawTimer?.invalidate() }
 
     func setRedrawsPaused(_ paused: Bool) {
         redrawsPaused = paused
-        redrawTimer?.fireDate = paused ? .distantFuture : Date()
-        if !paused { redraw() }
+        if paused {
+            stopRedrawTimer()
+        } else {
+            beginAnimationBurst()
+        }
+    }
+
+    private func beginAnimationBurst() {
+        guard !redrawsPaused else { return }
+        animationDeadline = Date().addingTimeInterval(Self.animationBurstDuration)
+        brightestFrame = nil
+        redraw()
+        guard redrawTimer == nil else { return }
+
+        let timer = Timer(timeInterval: Self.redrawInterval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.animationTick() }
+        }
+        timer.tolerance = 0.03
+        RunLoop.main.add(timer, forMode: .common)
+        redrawTimer = timer
+    }
+
+    private func animationTick() {
+        redraw()
+        guard Date() >= animationDeadline else { return }
+        if let frame = brightestFrame {
+            stripView.update(
+                colors: frame.colors,
+                brightness: frame.brightness,
+                isDark: frame.isDark
+            )
+        }
+        stopRedrawTimer()
+    }
+
+    private func stopRedrawTimer() {
+        redrawTimer?.invalidate()
+        redrawTimer = nil
     }
 
     // MARK: - Click
@@ -150,7 +189,11 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         let screen = button.window?.screen ?? NSScreen.main
         let available = (screen?.visibleFrame.height ?? 800) - Self.screenMargin
 
-        let content = MenuContent(model: model, agents: agents)
+        let content = MenuContent(
+            model: model,
+            agents: agents,
+            onLEDCountChange: { [weak self] _ in self?.beginAnimationBurst() }
+        )
         let controller = NSHostingController(rootView: AnyView(content))
         controller.view.layoutSubtreeIfNeeded()
 
@@ -299,6 +342,18 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         let count = ledCount
         let colors = engine.colors(for: model.program, ledCount: count, at: now)
         let isDark = button.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        let score = colors.reduce(0.0) { partial, color in
+            let value = color.displayComponents(brightness: engine.brightness)
+            return partial + max(value.r, max(value.g, value.b))
+        }
+        if brightestFrame == nil || score > brightestFrame!.score {
+            brightestFrame = CapturedFrame(
+                colors: colors,
+                brightness: engine.brightness,
+                isDark: isDark,
+                score: score
+            )
+        }
         let contentWidth = Self.imageSize(ledCount: count).width
         if stripView.ledCount != count {
             stripView.setLEDCount(count, width: contentWidth)
@@ -427,6 +482,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     /// `--diagnose` can prove the panel follows the item when it resizes.
     func setLEDCountForDiagnostics(_ count: Int) {
         UserDefaults.standard.set(count, forKey: LEDPreview.storageKey)
+        beginAnimationBurst()
     }
 
     /// How far the panel's beak is from the centre of the status item. This is

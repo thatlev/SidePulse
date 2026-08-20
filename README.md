@@ -339,10 +339,11 @@ clamped to the screen with a scrolling fallback so it can never overflow.
 renders simple labels dependably; given an animated `Canvas` it can produce a
 blank or zero-width item, which is indistinguishable from a failed launch. The
 item is an `NSStatusItem` with one persistent layer-backed strip driven by the
-same engine the popover and the phone use. The tiny menu-bar preview is capped
-at 10 fps and publishes only visibly changed, 8-bit-quantized LED colors; it
-does not replace the status-item image or ask AppKit to replicate a fresh
-snapshot across every display each frame. Each LED draws an unlit chassis
+same engine the popover and the phone use. When a program changes, the tiny
+menu-bar preview animates at up to 10 fps for two seconds and then freezes on
+its brightest representative frame. It publishes only visibly changed,
+8-bit-quantized LED colors and does not replace the status-item image or keep
+the shared menu-bar scene awake indefinitely. Each LED draws an unlit chassis
 first, so an idle or all-off program still shows a visible, clickable row of
 dots instead of near-black dots on a near-black menu bar.
 

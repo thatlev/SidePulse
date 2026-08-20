@@ -7,6 +7,7 @@ import SwiftUI
 struct MenuContent: View {
     @ObservedObject var model: ServerModel
     @ObservedObject var agents: AgentHooksModel
+    var onLEDCountChange: (Int) -> Void = { _ in }
     @AppStorage(LEDPreview.storageKey) private var ledCount = LEDPreview.defaultCount
 
     var body: some View {
@@ -23,6 +24,9 @@ struct MenuContent: View {
                 .pickerStyle(.segmented)
                 .labelsHidden()
                 .controlSize(.small)
+                .onChange(of: ledCount) { value in
+                    onLEDCountChange(value)
+                }
             }
 
             if let parseError = model.parseError {

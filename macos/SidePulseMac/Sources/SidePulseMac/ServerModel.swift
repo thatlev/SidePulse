@@ -4,6 +4,7 @@
 import Foundation
 import Combine
 import AppKit
+import Darwin
 
 @MainActor
 final class ServerModel: ObservableObject {
@@ -22,18 +23,17 @@ final class ServerModel: ObservableObject {
     let writeLogPath = LEDFile.writeLogPath
 
     private var server: LEDHTTPServer?
-    private var watchTimer: Timer?
+    private var watchSource: DispatchSourceFileSystemObject?
+    private var fallbackTimer: Timer?
     private var lastSignature: FileSignature?
     /// Read by `/health` on the network queue, so it cannot live on the main actor.
     private let writeCounter = AtomicCounter()
 
-    /// Mirrors the Python server's 0.2 s poll.
-    ///
-    /// Polling rather than watching a file descriptor is deliberate: the
-    /// controllers write atomically (temp file + rename), so the path gets a new
-    /// inode on every update and a `DispatchSource` bound to the old descriptor
-    /// would go silent after the first write.
-    private static let watchInterval: TimeInterval = 0.2
+    /// A directory source survives the controllers' atomic temp-file rename,
+    /// unlike a source attached to the replaced LEDS.TXT inode. A slow fallback
+    /// poll covers filesystems that do not deliver directory events reliably.
+    private static let fallbackInterval: TimeInterval = 30
+    private static let pollingOnlyInterval: TimeInterval = 0.2
 
     var isRunning: Bool {
         if case .running = serverState { return true }
@@ -67,16 +67,23 @@ final class ServerModel: ObservableObject {
         self.server = server
         server.start()
 
-        let timer = Timer(timeInterval: Self.watchInterval, repeats: true) { [weak self] _ in
+        let hasDirectoryWatcher = startDirectoryWatcher()
+        let interval = hasDirectoryWatcher
+            ? Self.fallbackInterval
+            : Self.pollingOnlyInterval
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.poll() }
         }
+        timer.tolerance = hasDirectoryWatcher ? 5 : 0.03
         RunLoop.main.add(timer, forMode: .common)
-        watchTimer = timer
+        fallbackTimer = timer
     }
 
     func stop() {
-        watchTimer?.invalidate()
-        watchTimer = nil
+        fallbackTimer?.invalidate()
+        fallbackTimer = nil
+        watchSource?.cancel()
+        watchSource = nil
         server?.stop()
         server = nil
     }
@@ -88,7 +95,8 @@ final class ServerModel: ObservableObject {
 
     private func poll() {
         let sig = LEDFile.signature()
-        fileExists = sig != nil
+        let exists = sig != nil
+        if fileExists != exists { fileExists = exists }
         guard let sig else {
             if lastSignature != nil {
                 lastSignature = nil
@@ -103,6 +111,26 @@ final class ServerModel: ObservableObject {
         lastWriteAt = Date()
         LEDFile.appendWriteLog(sig)
         reloadProgram()
+    }
+
+    private func startDirectoryWatcher() -> Bool {
+        let descriptor = open(LEDFile.directory, O_EVTONLY)
+        guard descriptor >= 0 else { return false }
+
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: descriptor,
+            eventMask: [.write, .rename, .delete],
+            queue: .main
+        )
+        source.setEventHandler { [weak self] in
+            MainActor.assumeIsolated { self?.poll() }
+        }
+        source.setCancelHandler {
+            close(descriptor)
+        }
+        watchSource = source
+        source.resume()
+        return true
     }
 
     private func reloadProgram() {

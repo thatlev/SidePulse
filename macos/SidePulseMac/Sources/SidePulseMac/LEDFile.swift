@@ -38,10 +38,10 @@ enum LEDFile {
     /// `$SIDEPULSE_FILE`, else `~/sidepulse/LEDS.TXT`. The controllers, the CLI
     /// and both servers honour the same variable, which is the single switch
     /// that points everything at real hardware.
-    static var path: String {
+    static let path: String = {
         let raw = ProcessInfo.processInfo.environment["SIDEPULSE_FILE"] ?? "~/sidepulse/LEDS.TXT"
         return (raw as NSString).expandingTildeInPath
-    }
+    }()
 
     static var directory: String { (path as NSString).deletingLastPathComponent }
 
@@ -50,17 +50,14 @@ enum LEDFile {
     }
 
     static func signature() -> FileSignature? {
-        guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
-              let size = attrs[.size] as? NSNumber,
-              let modified = attrs[.modificationDate] as? Date else { return nil }
-        // attributesOfItem only gives second-or-so resolution via Date, which is
-        // too coarse to detect two writes inside one second. stat() gives the
-        // real nanosecond field the Python server uses.
+        // One `stat` supplies both nanosecond modification time and size. The
+        // previous `attributesOfItem` call duplicated this filesystem lookup
+        // on every watcher poll and its Date value was not precise enough to
+        // use anyway.
         var st = stat()
         guard stat(path, &st) == 0 else { return nil }
-        _ = modified
         let nanos = UInt64(st.st_mtimespec.tv_sec) * 1_000_000_000 + UInt64(st.st_mtimespec.tv_nsec)
-        return FileSignature(mtimeNanos: nanos, size: size.uint64Value)
+        return FileSignature(mtimeNanos: nanos, size: UInt64(st.st_size))
     }
 
     static func read() -> Data? { FileManager.default.contents(atPath: path) }
