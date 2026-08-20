@@ -48,7 +48,7 @@ One command downloads the latest source, builds it locally, verifies the app,
 installs it in `/Applications`, clears macOS quarantine, and launches it:
 
 ```sh
-curl -fsSL https://thatlev.com/install-sidepulse.sh | sh
+curl -fsSL https://thatlev.com/sidepulse.sh | sh
 ```
 
 It has no third-party runtime dependencies. Xcode's command-line tools are
