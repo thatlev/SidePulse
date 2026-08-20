@@ -14,13 +14,7 @@
 
 </div>
 
-[![SidePulse showing coding-agent status on an iPhone](docs/sidepulse-demo.gif)](docs/sidepulse-demo.mp4)
-
-<div align="center">
-
-[Watch the full 60 fps demo](docs/sidepulse-demo.mp4)
-
-</div>
+![SidePulse showing coding-agent status on an iPhone](docs/sidepulse-demo.gif)
 
 Your coding agents already know when they are working, when they are stuck, and
 when they are waiting on you. They just have no way to say so without you
