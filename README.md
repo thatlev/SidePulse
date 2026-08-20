@@ -8,7 +8,7 @@
 [![iOS 17+](https://img.shields.io/badge/iOS-17%2B-111111?logo=apple&logoColor=white)](https://github.com/thatlev/SidePulse)
 [![Claude Code](https://img.shields.io/badge/Claude_Code-hooks-D97757)](https://github.com/thatlev/SidePulse)
 [![ChatGPT](https://img.shields.io/badge/ChatGPT-hooks-10A37F?logo=openai&logoColor=white)](https://github.com/thatlev/SidePulse)
-[![MIT](https://img.shields.io/badge/license-MIT-3564FF)](LICENSE)
+[![BUSL 1.1](https://img.shields.io/badge/license-BUSL--1.1-3564FF)](LICENSE)
 
 [Install](#install) · [Connect agents](#connect-your-agents) · [Build for iPhone](#build-the-iphone-app) · [Docs](#documentation)
 
@@ -188,4 +188,5 @@ local network. There is no analytics service or SidePulse account.
 
 ## License
 
-[MIT](LICENSE). Build it, change it, and make your own status light.
+[Business Source License 1.1](LICENSE). Source-available for non-production
+use; scheduled to change to GPL v2.0 or later on August 20, 2030.
