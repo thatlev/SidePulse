@@ -24,9 +24,9 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     private let engine = EngineBox()
     private var redrawTimer: Timer?
 
-    /// 20 fps. The strip's animations are slow enough that going faster only
-    /// costs battery on a view that is on screen permanently.
-    private static let redrawInterval: TimeInterval = 0.05
+    /// Match a standard display refresh. The previous 20 fps cap made moving
+    /// light programs visibly step even when the engine itself was smooth.
+    private static let redrawInterval: TimeInterval = 1.0 / 60.0
 
     private var ledCount: Int {
         let stored = UserDefaults.standard.integer(forKey: LEDPreview.storageKey)
@@ -58,6 +58,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         let timer = Timer(timeInterval: Self.redrawInterval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.redraw() }
         }
+        timer.tolerance = 0.001
         // .common so the strip keeps animating while a menu is tracking.
         RunLoop.main.add(timer, forMode: .common)
         redrawTimer = timer

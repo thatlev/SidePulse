@@ -6,7 +6,9 @@ struct SidePulseOnboardingView: View {
     @ObservedObject var agents: AgentHooksModel
     let onFinish: () -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var step = Step.welcome
+    @State private var navigationDirection = NavigationDirection.forward
     @State private var completedPromptSteps: Set<Step> = []
     @State private var copiedPromptStep: Step?
     @State private var copyFeedbackGeneration = 0
@@ -31,6 +33,11 @@ struct SidePulseOnboardingView: View {
         }
     }
 
+    private enum NavigationDirection {
+        case forward
+        case backward
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             navigation
@@ -39,7 +46,7 @@ struct SidePulseOnboardingView: View {
             Divider()
             stepContent
                 .id(step)
-                .transition(.opacity.combined(with: .move(edge: .trailing)))
+                .transition(stepTransition)
                 .padding(.horizontal, 50)
                 .padding(.vertical, 32)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -126,14 +133,16 @@ struct SidePulseOnboardingView: View {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text("\(agents.connectedCount) of \(agents.installableProviders.count) available agents connected")
                                     .font(.headline)
-                                Text("Claude Code, Codex, and Kimi are detected from their local config folders.")
+                                Text("Claude Code and ChatGPT are detected from their local config folders.")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
                             Spacer()
-                            Button("Connect all") { agents.connectAll() }
+                            Button(agents.allConnected ? "Disconnect hooks" : "Connect hooks") {
+                                agents.toggleHooks()
+                            }
                                 .buttonStyle(.borderedProminent)
-                                .disabled(!agents.canConnectAny)
+                                .disabled(!agents.canToggleHooks)
                         }
                         if let error = agents.errorMessage {
                             Text(error)
@@ -185,11 +194,21 @@ struct SidePulseOnboardingView: View {
                     detail: "Follow the build and star the repository. SidePulse only records that each link was opened."
                 )
                 VStack(spacing: 10) {
-                    supportButton("Follow @thatlevco on X", icon: "at", done: openedX) {
+                    supportButton(
+                        "Follow @thatlevco on X",
+                        assetName: "XMark",
+                        assetExtension: "svg",
+                        done: openedX
+                    ) {
                         openedX = true
                         NSWorkspace.shared.open(URLs.xProfile)
                     }
-                    supportButton("Star SidePulse on GitHub", icon: "star.fill", done: openedGitHub) {
+                    supportButton(
+                        "Star SidePulse on GitHub",
+                        assetName: "GitHubMark",
+                        assetExtension: "svg",
+                        done: openedGitHub
+                    ) {
                         openedGitHub = true
                         NSWorkspace.shared.open(URLs.repository)
                     }
@@ -311,13 +330,31 @@ struct SidePulseOnboardingView: View {
         .background(onboardingSurface)
     }
 
-    private func supportButton(_ title: String, icon: String, done: Bool, action: @escaping () -> Void) -> some View {
+    private func supportButton(
+        _ title: String,
+        assetName: String,
+        assetExtension: String,
+        done: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
         Button(action: action) {
             HStack(spacing: 12) {
-                Image(systemName: icon)
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(done ? Theme.live : Color.accentColor)
-                    .frame(width: 34)
+                Group {
+                    if let url = Bundle.module.url(forResource: assetName, withExtension: assetExtension),
+                       let image = NSImage(contentsOf: url) {
+                        Image(nsImage: image)
+                            .resizable()
+                            .renderingMode(.template)
+                            .scaledToFit()
+                            .foregroundStyle(done ? Theme.live : Color.primary)
+                            .padding(5)
+                    } else {
+                        Image(systemName: "link")
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(done ? Theme.live : Color.accentColor)
+                    }
+                }
+                .frame(width: 34, height: 34)
                 Text(title).font(.headline)
                 Spacer()
                 Image(systemName: done ? "checkmark.circle.fill" : "arrow.up.right")
@@ -338,7 +375,20 @@ struct SidePulseOnboardingView: View {
     private func move(to rawValue: Int) {
         guard let next = Step(rawValue: rawValue) else { return }
         copiedPromptStep = nil
-        withAnimation(.easeOut(duration: 0.2)) { step = next }
+        navigationDirection = next.rawValue > step.rawValue ? .forward : .backward
+        withAnimation(.timingCurve(0.22, 1, 0.36, 1, duration: 0.24)) {
+            step = next
+        }
+    }
+
+    private var stepTransition: AnyTransition {
+        guard !reduceMotion else { return .opacity }
+        let insertionEdge: Edge = navigationDirection == .forward ? .trailing : .leading
+        let removalEdge: Edge = navigationDirection == .forward ? .leading : .trailing
+        return .asymmetric(
+            insertion: .opacity.combined(with: .move(edge: insertionEdge)),
+            removal: .opacity.combined(with: .move(edge: removalEdge))
+        )
     }
 
     private func copy(_ value: String, for step: Step) {

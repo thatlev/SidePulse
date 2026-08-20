@@ -37,11 +37,11 @@ final class AgentHooksModel: ObservableObject {
     // MARK: Derived state
 
     var installableProviders: [AgentProvider] {
-        AgentProvider.allCases.filter { status[$0] != .unavailable }
+        AgentProvider.primaryCases.filter { status[$0] != .unavailable }
     }
 
     var connectedCount: Int {
-        status.values.filter { $0 == .connected }.count
+        installableProviders.filter { status[$0] == .connected }.count
     }
 
     var helperInstalled: Bool { controller.isInstalled }
@@ -54,6 +54,15 @@ final class AgentHooksModel: ObservableObject {
 
     var canDisconnectAny: Bool {
         installableProviders.contains { status[$0] == .connected }
+    }
+
+    var allConnected: Bool {
+        !installableProviders.isEmpty
+            && installableProviders.allSatisfy { status[$0] == .connected }
+    }
+
+    var canToggleHooks: Bool {
+        allConnected ? canDisconnectAny : canConnectAny
     }
 
     // MARK: Actions
@@ -88,6 +97,16 @@ final class AgentHooksModel: ObservableObject {
             for provider in installableProviders where status[provider] == .connected {
                 try AgentHooks.disconnect(provider)
             }
+        }
+    }
+
+    /// One setup action also repairs a partial install: connect every missing
+    /// primary provider unless all are already connected, then disconnect all.
+    func toggleHooks() {
+        if allConnected {
+            disconnectAll()
+        } else {
+            connectAll()
         }
     }
 

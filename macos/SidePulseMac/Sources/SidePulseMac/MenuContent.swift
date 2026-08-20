@@ -91,18 +91,17 @@ struct MenuContent: View {
                         .font(.system(size: 10, weight: .medium))
                         .monospacedDigit()
                         .foregroundStyle(.secondary)
-                    Button("Connect all") { agents.connectAll() }
-                        .buttonStyle(PillButtonStyle(prominent: true))
-                        .disabled(!agents.canConnectAny)
-                    Button("Remove all") { agents.disconnectAll() }
-                        .buttonStyle(PillButtonStyle())
-                        .disabled(!agents.canDisconnectAny)
+                    Button(agents.allConnected ? "Disconnect hooks" : "Connect hooks") {
+                        agents.toggleHooks()
+                    }
+                    .buttonStyle(PillButtonStyle(prominent: !agents.allConnected))
+                    .disabled(!agents.canToggleHooks)
                 }
             }
 
             Card(padding: 4) {
                 VStack(spacing: 0) {
-                    ForEach(Array(AgentProvider.allCases.enumerated()), id: \.element.id) { index, provider in
+                    ForEach(Array(AgentProvider.primaryCases.enumerated()), id: \.element.id) { index, provider in
                         if index > 0 {
                             Divider().opacity(0.4).padding(.leading, 34)
                         }
@@ -145,7 +144,7 @@ struct MenuContent: View {
     /// The caveat for any connected provider that has one — currently only
     /// Codex's one-time `/hooks` trust review.
     private var pendingCaveat: String? {
-        AgentProvider.allCases
+        AgentProvider.primaryCases
             .first { agents.status[$0] == .connected && $0.caveat != nil }?
             .caveat
     }
@@ -180,12 +179,10 @@ struct MenuContent: View {
             if available {
                 if connected {
                     StatusDot(color: Theme.live, size: 6)
-                    Button("Remove") { agents.disconnect(provider) }
-                        .buttonStyle(PillButtonStyle())
                 } else {
-                    Button("Connect") { agents.connect(provider) }
-                        .buttonStyle(PillButtonStyle(prominent: true))
-                        .disabled(!agents.helperInstalled)
+                    Text("Not connected")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
                 }
             } else {
                 Text("Not installed")

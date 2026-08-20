@@ -7,7 +7,8 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "SidePulseMac",
-            path: "Sources/SidePulseMac"
+            path: "Sources/SidePulseMac",
+            resources: [.process("Resources")]
         )
     ]
 )

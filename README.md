@@ -1,10 +1,32 @@
+<div align="center">
+
 # SidePulse
+
+### See when Claude Code or ChatGPT needs you.
+
+[![macOS 13+](https://img.shields.io/badge/macOS-13%2B-111111?logo=apple&logoColor=white)](https://github.com/thatlev/SidePulse)
+[![iOS 17+](https://img.shields.io/badge/iOS-17%2B-111111?logo=apple&logoColor=white)](https://github.com/thatlev/SidePulse)
+[![Claude Code](https://img.shields.io/badge/Claude_Code-hooks-D97757)](https://github.com/thatlev/SidePulse)
+[![ChatGPT](https://img.shields.io/badge/ChatGPT-hooks-10A37F?logo=openai&logoColor=white)](https://github.com/thatlev/SidePulse)
+[![MIT](https://img.shields.io/badge/license-MIT-3564FF)](LICENSE)
+
+[Mac setup](#1-install-the-mac-app) · [Connect hooks](#2-connect-claude-code--chatgpt) · [iPhone setup](#3-build-the-iphone-app) · [How it works](#how-it-works)
+
+</div>
+
+[![SidePulse showing coding-agent status on an iPhone](docs/sidepulse-demo.gif)](docs/sidepulse-demo.mp4)
+
+<div align="center">
+
+[Watch the full 60 fps demo](docs/sidepulse-demo.mp4)
+
+</div>
 
 Your coding agents already know when they are working, when they are stuck, and
 when they are waiting on you. They just have no way to say so without you
 looking at the window. SidePulse turns that into a light.
 
-Claude Code, Codex and Kimi fire lifecycle hooks. A small controller turns each
+Claude Code and ChatGPT fire lifecycle hooks. A small controller turns each
 event into an LED program and writes it to a plain text file. The Mac app serves
 that file over your network; an iPhone next to the keyboard renders it as an LED
 strip. Glance instead of checking.
@@ -20,10 +42,19 @@ connected. The complete manual and troubleshooting path is in
 
 ---
 
-## 1. Build the Mac app
+## 1. Install the Mac app
 
-There is no download — you compile it. It has no dependencies, so Xcode's
-command line tools are enough (`xcode-select --install`). macOS 13 or newer.
+One command downloads the latest source, builds it locally, verifies the app,
+installs it in `/Applications`, clears macOS quarantine, and launches it:
+
+```sh
+curl -fsSL https://thatlev.com/install-sidepulse.sh | sh
+```
+
+It has no third-party runtime dependencies. Xcode's command-line tools are
+enough (`xcode-select --install`), and it requires macOS 13 or newer.
+
+To work from a checkout instead:
 
 ```sh
 git clone https://github.com/thatlev/SidePulse.git
@@ -31,8 +62,7 @@ cd SidePulse/macos/SidePulseMac
 ./build.sh --install --run
 ```
 
-That builds a release binary, assembles `SidePulse.app` around it, generates
-the icon, ad-hoc signs it, copies it to `/Applications` and launches it.
+That performs the same local release build from a directory you keep.
 
 Variants, if you want the steps separately:
 
@@ -51,7 +81,7 @@ download it.
 There is no window and no Dock icon. Look for a row of small LED dots in your
 menu bar — that is the entire app. Click it for the panel.
 
-## 2. Wire up your agents
+## 2. Connect Claude Code & ChatGPT
 
 The lights run on hooks, so each agent needs a few lines in its config. Install
 the controller once:
@@ -60,15 +90,19 @@ the controller once:
 ./install.sh
 ```
 
-Then open the menu bar panel and press **Connect all** under *Agents*. That
-merges SidePulse's hooks into the user-level config for Claude Code, Codex and
-Kimi — every project on the machine, no per-repo setup. **Remove all** takes
-them straight back out, and only ever removes entries SidePulse added.
+Then open the menu bar panel and press **Connect hooks** under *Agents*. That
+merges SidePulse's hooks into the user-level config for Claude Code and
+ChatGPT — every project on the machine, with no per-repo setup. The same button
+becomes **Disconnect hooks** when both are connected.
+
+SidePulse recognizes only its exact helper commands and shares StillOn's
+configuration lock. Connecting or disconnecting SidePulse leaves StillOn and
+all other hooks untouched, even if both apps update the same config files.
 
 Nothing is written to `CLAUDE.md` or `AGENTS.md`. Your agents never read about
 SidePulse and never spend a token on it.
 
-Codex reviews new hooks once. Run `/hooks` inside Codex after connecting.
+ChatGPT reviews new hooks once. Run `/hooks` inside ChatGPT after connecting.
 
 ## 3. Build the iPhone app
 
@@ -122,13 +156,13 @@ sidepulse-solo --release    # back to whoever moved last
 To see the colours without waiting for an agent: `sidepulse thinking`,
 `sidepulse working`, `sidepulse done`, `sidepulse attention`, `sidepulse off`.
 
-To stop it, press **Remove all** in the panel — that unhooks the agents and
+To stop it, press **Disconnect hooks** in the panel — that unhooks the agents and
 leaves everything installed. `./uninstall.sh` removes the lot.
 
 ## How it works
 
 ```
-Claude Code / Codex / Kimi
+Claude Code / ChatGPT
         │  lifecycle hooks pipe event JSON on stdin
         ▼
 ~/bin/sidepulse-solo          single-agent controller — one claimed project
@@ -234,7 +268,7 @@ SidePulse in a global config is pulling agent attention where it isn't wanted.
 | `tools/test_sidepulse_event.py` | Controller test suite (93 checks). |
 | `tools/swift-tests/main.swift` | Parser/engine unit tests (run on macOS). |
 | `tools/swift-client-tests/main.swift` | App polling/recovery regression tests. |
-| `tools/swift-hooks-tests/main.swift` | Agent-config wiring tests (62 checks). Requires `$SIDEPULSE_AGENT_HOME` to point at a sandbox — it refuses to run otherwise. |
+| `tools/swift-hooks-tests/main.swift` | Agent-config wiring tests (78 checks). Requires `$SIDEPULSE_AGENT_HOME` to point at a sandbox — it refuses to run otherwise. |
 
 Runtime data lives **outside** the repo and is git-ignored defensively:
 `~/sidepulse/LEDS.TXT`, `~/sidepulse/write-log.csv`, `~/sidepulse/server.log`,
@@ -318,45 +352,44 @@ clamped to the screen with a scrolling fallback so it can never overflow.
 **The status item is AppKit, not `MenuBarExtra`.** SwiftUI's `MenuBarExtra` only
 renders simple labels dependably; given an animated `Canvas` it can produce a
 blank or zero-width item, which is indistinguishable from a failed launch. The
-item is an `NSStatusItem` whose `NSImage` is redrawn at 20 fps from the same
+item is an `NSStatusItem` whose `NSImage` is redrawn at 60 fps from the same
 engine the popover and the phone use. Each LED draws an unlit chassis first, so
 an idle or all-off program still shows a visible, clickable row of dots instead
 of near-black dots on a near-black menu bar.
 
 ### Wiring agents up from the popover
 
-The **Agents** section does from a button what
-`agents/install-claude-hooks.sh` and the README's Kimi/Codex instructions do by
-hand: it merges SidePulse's lifecycle hooks into each agent's **user-level**
-config, so every project on the machine is covered.
+The **Agents** section merges SidePulse's lifecycle hooks into each agent's
+**user-level** config, so every project on the machine is covered.
 
 | Agent | File it edits |
 |---|---|
 | Claude Code (CLI, VS Code extension, desktop app) | `~/.claude/settings.json` |
-| Codex | `~/.codex/hooks.json` |
-| Kimi CLI | `~/.kimi-code/config.toml` |
+| ChatGPT | `~/.codex/hooks.json` |
 
-**Connect** adds that agent's hooks, **Remove** takes them out, and
-**Connect all** / **Remove all** do the set. An agent whose config directory
-does not exist is shown as *Not installed* and cannot be toggled. **Controller**
-picks which helper the hooks call — `sidepulse-solo` (the whole strip is one
-agent) or `sidepulse-event` (3 slots), matching `install.sh` and
-`install.sh --multi`; switching it rewrites whatever is already connected.
+One **Connect hooks** button adds any missing Claude Code and ChatGPT hooks.
+When both are connected it becomes **Disconnect hooks** and removes both.
+An agent whose config directory does not exist is shown as *Not installed*.
+**Controller** picks which helper the hooks call — `sidepulse-solo` (the whole
+strip is one agent) or `sidepulse-event` (3 slots), matching `install.sh`
+and `install.sh --multi`; switching it rewrites whatever is connected.
 
 Three things make this safe to run against a config that already has hooks in
 it from other tools:
 
-- **Only SidePulse entries are ever removed.** Removal matches on the command
-  containing `sidepulse`, so unrelated hooks are untouched — and a block you
-  added by hand from this README is cleaned up too.
+- **Only exact SidePulse helper commands are ever removed.** StillOn and
+  unrelated commands remain untouched, even if their path includes
+  `sidepulse`.
 - **Connecting twice replaces rather than stacks**, so the buttons are
   idempotent and cannot leave you firing the light twice per event.
 - **A config that does not parse is refused, not overwritten.** You get an
   error in the popover instead of a clobbered file.
+- **StillOn and SidePulse share one configuration lock**, so simultaneous
+  updates cannot overwrite each other.
 
 A backup is written before every change (`.bak-sidepulse` on connect,
-`.bak-sidepulse-remove` on remove). Codex asks you to approve new hooks once —
-run `/hooks` inside Codex after connecting.
+`.bak-sidepulse-remove` on remove). ChatGPT asks you to approve new hooks once
+— run `/hooks` inside ChatGPT after connecting.
 
 This is hooks only. It deliberately does **not** add anything to
 `~/.claude/CLAUDE.md`, `AGENTS.md` or any other instruction file: the lights are
@@ -512,31 +545,19 @@ To keep it running across logins, install it as the LaunchAgent
 `~/sidepulse/sidepulse-server.py`. After editing `server/sidepulse-server.py`,
 re-copy it and `launchctl kickstart -k gui/$(id -u)/com.sidepulse.server`.
 
-### 3. Wire up the agent hooks
+### 3. Connect the agent hooks
 
 Each provider pipes its event JSON on stdin to the selected controller. The
 controller is the *only* thing that should touch the light.
 
-- **Claude Code (CLI, VS Code extension, desktop app — all share
-  `~/.claude/settings.json`):**
-  ```sh
-  ./agents/install-claude-hooks.sh
-  ```
-  Installs `SessionStart · UserPromptSubmit · PermissionRequest · PostToolUse ·
-  Stop · SessionEnd · Notification → sidepulse-event claude`
-  (a backup is written to `settings.json.bak-sidepulse`). To label
-  Kimi-via-Claude-Code correctly, launch it with `SIDEPULSE_PROVIDER=kimi`.
+Open the SidePulse menu, then press **Connect hooks**. SidePulse connects every
+installed primary provider:
 
-- **Kimi CLI** — add `[[hooks]]` in `~/.kimi-code/config.toml`:
-  `SessionStart · UserPromptSubmit · PermissionRequest · PermissionResult ·
-  Stop · StopFailure · Interrupt · SessionEnd → sidepulse-event kimi`.
+- **Claude Code** through `~/.claude/settings.json`.
+- **ChatGPT** through `~/.codex/hooks.json`; run `/hooks` once to approve it.
 
-- **Codex** — current Codex supports project-local lifecycle hooks. Put
-  `.codex/hooks.json` in only the project you want to instrument and send
-  `SessionStart · UserPromptSubmit · PermissionRequest · PostToolUse · Stop ·
-  SessionEnd` to `sidepulse-solo codex`. This repo includes that file. Codex
-  requires one-time review of new/changed hooks via `/hooks`; no global
-  `~/.codex/config.toml` or `AGENTS.md` change is needed.
+Press **Disconnect hooks** to reverse the setup. SidePulse does not write to
+`CLAUDE.md`, `AGENTS.md`, or project-local hook files.
 
 ### 4. Build & run the iPhone app
 
@@ -840,7 +861,7 @@ swiftc -O -o /tmp/hookstests \
   macos/SidePulseMac/Sources/SidePulseMac/AgentHooks.swift \
   tools/swift-hooks-tests/main.swift \
   && SIDEPULSE_AGENT_HOME=/tmp/sidepulse-hooks-test \
-     /tmp/hookstests /tmp/sidepulse-hooks-test          # 62 checks
+     /tmp/hookstests /tmp/sidepulse-hooks-test          # 78 checks
 sidepulse-event --status                    # live session/slot state
 curl -i http://localhost:8571/leds.txt      # 200 + ETag; re-GET w/ If-None-Match -> 304
 curl http://localhost:8571/health           # writes_seen counter

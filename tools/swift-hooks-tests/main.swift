@@ -44,7 +44,9 @@ let claudeOriginal = """
     "Stop" : [
       {
         "hooks" : [
-          { "command" : "node \\"/opt/other-tool/hook.cjs\\"", "type" : "command" }
+          { "command" : "node \\"/opt/other-tool/hook.cjs\\"", "type" : "command" },
+          { "command" : "\\"/Applications/StillOn.app/Contents/MacOS/stillon-agent-hook\\" claude", "type" : "command" },
+          { "command" : "node \\"/opt/sidepulse-monitor/hook.cjs\\"", "type" : "command" }
         ]
       }
     ]
@@ -59,7 +61,8 @@ let codexOriginal = """
     "UserPromptSubmit" : [
       {
         "hooks" : [
-          { "command" : "node \\"/opt/other-tool/prompt.cjs\\"", "type" : "command" }
+          { "command" : "node \\"/opt/other-tool/prompt.cjs\\"", "type" : "command" },
+          { "command" : "\\"/Applications/StillOn.app/Contents/MacOS/stillon-agent-hook\\" codex", "statusMessage" : "StillOn", "type" : "command" }
         ]
       }
     ]
@@ -134,6 +137,8 @@ for provider in AgentProvider.allCases {
 
 check(!AgentProvider.claude.displayPath.hasPrefix(sandbox),
       "display path is abbreviated, not absolute")
+check(AgentProvider.primaryCases == [.claude, .codex],
+      "one-button setup is limited to Claude Code and ChatGPT")
 
 // MARK: - Connect / disconnect round trip
 
@@ -152,6 +157,16 @@ for controller in SidePulseController.allCases {
               "\(provider.displayName) writes one entry per event [\(controller.label)]")
         check(body.contains("other-tool") || provider == .kimi,
               "\(provider.displayName) preserves the unrelated hook [\(controller.label)]")
+        check(body.contains("StillOn") || provider != .codex,
+              "\(provider.displayName) preserves StillOn [\(controller.label)]")
+        if provider == .claude {
+            check(body.contains("/opt/sidepulse-monitor/hook.cjs"),
+                  "Claude preserves foreign commands that merely contain sidepulse")
+        }
+        if provider == .codex {
+            check(body.contains("\"statusMessage\" : \"SidePulse\""),
+                  "ChatGPT handlers identify SidePulse in hook settings")
+        }
 
         // Connecting twice must replace, not stack.
         do { try AgentHooks.connect(provider, controller: controller) } catch {}
@@ -222,6 +237,23 @@ do {
 }
 check(read(AgentProvider.claude.configPath) == broken, "malformed config is left byte-for-byte intact")
 
+buildSandbox()
+let unsupportedHooks = "{ \"hooks\": { \"Stop\": { \"hooks\": [] } } }"
+try! unsupportedHooks.write(
+    toFile: AgentProvider.claude.configPath,
+    atomically: true,
+    encoding: .utf8
+)
+do {
+    try AgentHooks.connect(.claude, controller: .solo)
+    failures += 1
+    print("FAIL  unsupported hook shape was accepted")
+} catch {
+    checks += 1
+}
+check(read(AgentProvider.claude.configPath) == unsupportedHooks,
+      "unsupported hook shape is left byte-for-byte intact")
+
 // MARK: - Missing files are created rather than failing
 
 buildSandbox()
@@ -239,6 +271,28 @@ check(sameJSON(read(AgentProvider.claude.configPath + ".bak-sidepulse"), claudeO
 try? AgentHooks.disconnect(.claude)
 check(fm.fileExists(atPath: AgentProvider.claude.configPath + ".bak-sidepulse-remove"),
       "disconnect writes its own backup")
+
+// MARK: - File safety
+
+buildSandbox()
+try! fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: AgentProvider.claude.configPath)
+try? AgentHooks.connect(.claude, controller: .solo)
+let connectedMode = (try? fm.attributesOfItem(
+    atPath: AgentProvider.claude.configPath
+)[.posixPermissions] as? NSNumber)?.intValue
+check(connectedMode == 0o600, "atomic writes preserve config permissions")
+
+buildSandbox()
+let claudeTarget = (sandbox as NSString).appendingPathComponent(".claude/settings.real.json")
+try! fm.moveItem(atPath: AgentProvider.claude.configPath, toPath: claudeTarget)
+try! fm.createSymbolicLink(atPath: AgentProvider.claude.configPath, withDestinationPath: claudeTarget)
+try? AgentHooks.connect(.claude, controller: .solo)
+let symlinkValues = try? URL(fileURLWithPath: AgentProvider.claude.configPath)
+    .resourceValues(forKeys: [.isSymbolicLinkKey])
+check(symlinkValues?.isSymbolicLink == true, "atomic writes preserve config symlinks")
+try? AgentHooks.disconnect(.claude)
+check(sameJSON(read(claudeTarget), claudeOriginal),
+      "symlinked config round trip restores the target")
 
 try? fm.removeItem(atPath: sandbox)
 

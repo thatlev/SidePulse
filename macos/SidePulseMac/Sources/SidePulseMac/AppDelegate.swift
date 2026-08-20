@@ -33,7 +33,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menuBar = MenuBarController(model: model, agents: agents)
         model.start()
 
-        if !UserDefaults.standard.bool(forKey: Self.completedOnboardingKey) {
+        if arguments.contains("--onboarding-preview") {
+            NSApp.setActivationPolicy(.regular)
+        }
+        if arguments.contains("--onboarding-preview")
+            || !UserDefaults.standard.bool(forKey: Self.completedOnboardingKey) {
             showOnboarding()
         }
 

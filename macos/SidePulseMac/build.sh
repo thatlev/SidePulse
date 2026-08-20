@@ -41,6 +41,11 @@ cp "$BIN" "$BUNDLE/Contents/MacOS/SidePulseMac"
 cp Info.plist "$BUNDLE/Contents/Info.plist"
 printf 'APPL????' > "$BUNDLE/Contents/PkgInfo"
 
+RESOURCE_BUNDLE="$(dirname "$BIN")/SidePulseMac_SidePulseMac.bundle"
+if [ -d "$RESOURCE_BUNDLE" ]; then
+  cp -R "$RESOURCE_BUNDLE" "$BUNDLE/Contents/Resources/"
+fi
+
 # An app icon is optional; reuse the phone app's if it is present.
 ICON_SRC="../../ios/SidePulseSim/SidePulseSim/Assets.xcassets/AppIcon.appiconset/icon_1024.png"
 if [ -f "$ICON_SRC" ] && command -v iconutil >/dev/null 2>&1; then
